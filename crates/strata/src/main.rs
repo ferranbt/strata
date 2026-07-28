@@ -74,11 +74,14 @@ enum Command {
         /// Optional provider name; omit to describe every provider.
         provider: Option<String>,
     },
-    /// Serve all providers over an Arrow Flight (gRPC) server.
+    /// Serve all providers over Arrow Flight (gRPC) and GraphQL (HTTP) at once.
     Serve {
-        /// Address to bind, e.g. 127.0.0.1:50051.
+        /// Arrow Flight address.
         #[arg(long, default_value = "127.0.0.1:50051")]
         addr: String,
+        /// GraphQL HTTP address.
+        #[arg(long, default_value = "127.0.0.1:8080")]
+        graphql_addr: String,
     },
 }
 
@@ -202,8 +205,9 @@ async fn run() -> Result<()> {
                 pipe.source.mount, pipe.source.path, pipe.destination.mount, pipe.destination.path
             );
         }
-        Command::Serve { addr } => {
+        Command::Serve { addr, graphql_addr } => {
             let addr = addr.parse()?;
+            let graphql_addr = graphql_addr.parse()?;
 
             // Pipe subsystem: only spun up when pipes are declared, so `serve`
             // still runs without a catalog DB when there are none.
@@ -249,7 +253,8 @@ async fn run() -> Result<()> {
                     {
                         Ok(schema) => {
                             for ep in [&pipe.source, &pipe.destination] {
-                                let ep = strata_types::Endpoint::new(&ep.mount, strip_query(&ep.path));
+                                let ep =
+                                    strata_types::Endpoint::new(&ep.mount, strip_query(&ep.path));
                                 db.upsert_source_schema(&ep, &schema).await?;
                             }
                         }
@@ -266,7 +271,10 @@ async fn run() -> Result<()> {
                 strata::pipe::spawn_all(registry.clone(), store, all);
             }
 
-            strata::flight::serve(registry, addr).await?;
+            tokio::try_join!(
+                strata::flight::serve(registry.clone(), addr),
+                strata::graphql::serve(registry, graphql_addr),
+            )?;
         }
     }
     Ok(())
