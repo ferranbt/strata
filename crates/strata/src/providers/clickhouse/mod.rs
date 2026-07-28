@@ -73,7 +73,7 @@ impl Clickhouse {
 
     async fn table_columns(&self, table: &str) -> Result<Vec<Field>> {
         let sql = format!(
-            "SELECT name, type FROM system.columns \
+            "SELECT name, type, is_in_primary_key FROM system.columns \
              WHERE database = currentDatabase() AND table = {} \
              ORDER BY position FORMAT JSONEachRow",
             quote_str(table),
@@ -84,7 +84,11 @@ impl Clickhouse {
             .map(|r| {
                 let raw: RawColumn = serde_json::from_value(r).context("decoding column row")?;
                 let (base, nullable) = strip_nullable(&raw.sql_type);
-                Ok(Field::new(raw.name, ch_to_data_type(base)?, nullable))
+                let mut field = Field::new(raw.name, ch_to_data_type(base)?, nullable);
+                if raw.is_in_primary_key != 0 {
+                    field.annotate(Field::KEY, "true");
+                }
+                Ok(field)
             })
             .collect()
     }
@@ -244,6 +248,8 @@ struct RawColumn {
     name: String,
     #[serde(rename = "type")]
     sql_type: String,
+    #[serde(default)]
+    is_in_primary_key: u8,
 }
 
 /// Split a ClickHouse `Nullable(T)` wrapper, returning `(inner_type, nullable)`.
@@ -350,6 +356,7 @@ mod tests {
         sql::suite::write_then_read_paginates_by_cursor(&client).await?;
         sql::suite::filters_rows(&client).await?;
         sql::suite::projects_columns(&client).await?;
+        sql::suite::gets_single_row(&client).await?;
         Ok(())
     }
 }

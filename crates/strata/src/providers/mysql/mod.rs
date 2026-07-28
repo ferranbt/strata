@@ -75,7 +75,7 @@ impl SqlSource for Mysql {
 
         let rows = sqlx::query(
             "SELECT CAST(column_name AS CHAR) AS `name`, CAST(data_type AS CHAR) AS `type`, \
-                CAST(is_nullable AS CHAR) AS `nullable` \
+                CAST(is_nullable AS CHAR) AS `nullable`, CAST(column_key AS CHAR) AS `key` \
          FROM information_schema.columns \
          WHERE table_schema = DATABASE() AND table_name = ? ORDER BY ordinal_position",
         )
@@ -89,11 +89,15 @@ impl SqlSource for Mysql {
         let fields = rows
             .iter()
             .map(|r| {
-                Ok(Field::new(
+                let mut field = Field::new(
                     r.get::<String, _>("name"),
                     mysql_to_data_type(&r.get::<String, _>("type"))?,
                     r.get::<String, _>("nullable") == "YES",
-                ))
+                );
+                if r.get::<String, _>("key") == "PRI" {
+                    field.annotate(Field::KEY, "true");
+                }
+                Ok(field)
             })
             .collect::<Result<Vec<Field>>>()?;
         Ok(Schema::new(fields))
@@ -385,6 +389,7 @@ mod tests {
         sql::suite::write_then_read_paginates_by_cursor(&client).await?;
         sql::suite::filters_rows(&client).await?;
         sql::suite::projects_columns(&client).await?;
+        sql::suite::gets_single_row(&client).await?;
         Ok(())
     }
 }

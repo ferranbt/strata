@@ -109,11 +109,15 @@ impl SqlSource for Sqlite {
             .iter()
             .map(|r| {
                 let not_null = r.get::<i64, _>("notnull") != 0;
-                Field::new(
+                let mut field = Field::new(
                     r.get::<String, _>("name"),
                     sqlite_to_data_type(&r.get::<String, _>("type")),
                     !not_null,
-                )
+                );
+                if r.get::<i64, _>("pk") != 0 {
+                    field.annotate(Field::KEY, "true");
+                }
+                field
             })
             .collect();
         Ok(Schema::new(fields))
@@ -371,6 +375,7 @@ mod tests {
         sql::suite::write_then_read_paginates_by_cursor(&client).await?;
         sql::suite::filters_rows(&client).await?;
         sql::suite::projects_columns(&client).await?;
+        sql::suite::gets_single_row(&client).await?;
         let _ = std::fs::remove_file(&path);
         Ok(())
     }

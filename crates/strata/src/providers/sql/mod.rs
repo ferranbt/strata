@@ -17,8 +17,8 @@ use std::sync::Arc;
 
 use futures::StreamExt;
 
-use anyhow::{Result, bail};
-use schema::{HasSchema, Schema};
+use anyhow::{Result, anyhow, bail};
+use schema::{DataType, HasSchema, Schema};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -250,6 +250,43 @@ pub trait SqlSource: Send + Sync + 'static {
         }
     }
 
+    fn get_row(
+        &self,
+        table: &str,
+        key: &str,
+    ) -> impl Future<Output = Result<Option<Value>>> + Send {
+        async move {
+            let schema = self.table_schema(table).await?;
+            let key_field = schema
+                .fields
+                .iter()
+                .find(|f| f.is_key())
+                .ok_or_else(|| anyhow!("table `{table}` has no key column"))?;
+            let value = if matches!(key_field.data_type, DataType::Int64 | DataType::UInt64) {
+                key.parse::<i64>()
+                    .map(Value::from)
+                    .unwrap_or_else(|_| Value::String(key.to_string()))
+            } else {
+                Value::String(key.to_string())
+            };
+            let filter = Filter::Cmp {
+                field: key_field.name.clone(),
+                op: Op::Eq,
+                value,
+            };
+            let cursor = SqlCursor {
+                offset: 0,
+                limit: 1,
+                cursor: None,
+            };
+            Ok(self
+                .table_rows(table, &cursor, Some(&filter))
+                .await?
+                .into_iter()
+                .next())
+        }
+    }
+
     fn register_tables(r: &mut Router<Self>)
     where
         Self: Provider,
@@ -268,6 +305,12 @@ pub trait SqlSource: Send + Sync + 'static {
                 .strategy(ListStrategy::Offset)
                 .queryable(),
         );
+        r.add(
+            Route::new()
+                .path("/tables/:table/:id")
+                .get_records(table_get::<Self>)
+                .data_type(table_data_schema::<Self>),
+        );
         r.add(Route::new().path("/tables/:table").put(write_table::<Self>));
     }
 }
@@ -281,6 +324,21 @@ pub async fn list_tables<S: SqlSource>(db: Arc<S>, _p: Params) -> Result<Page<Ta
         .map(|name| TableName { name })
         .collect();
     Ok(Page::new(items, Cursor::empty()))
+}
+
+pub async fn table_get<S: SqlSource>(db: Arc<S>, p: Params) -> Result<Value> {
+    let table = p.get("table")?;
+    let key = p.get("id")?;
+    let mut row = db
+        .get_row(table, key)
+        .await?
+        .ok_or_else(|| anyhow!("no row with key `{key}` in table `{table}`"))?;
+    if let Some(fields) = get_projection(&p)
+        && let Value::Object(map) = &mut row
+    {
+        map.retain(|k, _| fields.contains(k));
+    }
+    Ok(row)
 }
 
 /// `list_records /tables/:table/data`: a page of a table's rows as typed Arrow
@@ -483,6 +541,8 @@ pub mod suite {
         let columns: Vec<&str> = schema.fields.iter().map(|f| f.name.as_str()).collect();
         assert_eq!(columns, ["id", "name"]);
         assert_eq!(schema.fields[0].data_type, DataType::Int64);
+        assert!(schema.fields[0].is_key(), "`id` must round-trip as the key");
+        assert!(!schema.fields[1].is_key(), "`name` is not a key");
         Ok(())
     }
 
@@ -649,6 +709,28 @@ pub mod suite {
 
         let mut full = client.list::<Row>("/tables/projected").await?;
         assert_eq!(full.next().await?.len(), 2);
+        Ok(())
+    }
+
+    pub async fn gets_single_row<S: Provider>(client: &Client<S>) -> Result<()> {
+        let rows = [
+            Row {
+                id: 1,
+                name: "a".into(),
+            },
+            Row {
+                id: 2,
+                name: "b".into(),
+            },
+        ];
+        let _: WriteResult = client.put("/tables/getone", Dataset::of(&rows)?).await?;
+
+        let row: Row = client.get("/tables/getone/2").await?;
+        assert_eq!(row.id, 2);
+        assert_eq!(row.name, "b");
+
+        let projected: RowProjected = client.get("/tables/getone/2?fields=name").await?;
+        assert_eq!(projected.name, "b");
         Ok(())
     }
 }
