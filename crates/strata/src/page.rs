@@ -48,7 +48,7 @@ impl<T> Page<T> {
 /// `list` route (`.strategy(…)`); the router only stores the signal — the sync
 /// system alongside `pipe` is what interprets it. The two differ in where a run
 /// starts, when it stops, and what a re-sync does.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum ListStrategy {
     /// Finite backfill by offset/limit. `next` reaches `None` at the tail, so a run
     /// starts from the beginning and drains to completion. A re-sync re-scans from

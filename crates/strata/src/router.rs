@@ -305,14 +305,7 @@ struct Entry<S> {
     schema_resolver: Option<SchemaResolver<S>>,
     /// Human-readable description of the endpoint, for introspection.
     description: Option<String>,
-    strategy: Option<ListStrategy>,
-    /// How a sink should apply this source's rows when piped: `Merge` if the source
-    /// re-emits updated elements (upsert on key), else `Append`. Independent of the
-    /// walk `strategy`.
-    disposition: Option<Disposition>,
-    /// Whether this list route accepts the `filter`/`fields` read params — the
-    /// signal a query surface (GraphQL) reads to expose `where` + projection.
-    queryable: bool,
+    metadata: RouterMetadata,
 }
 
 impl<S> Entry<S> {
@@ -325,6 +318,7 @@ impl<S> Entry<S> {
             params: self.pattern.param_names(),
             body: self.body_schema.clone(),
             response: self.response_schema.clone(),
+            metadata: self.metadata.clone(),
         }
     }
 }
@@ -652,11 +646,23 @@ impl<S: Send + Sync + 'static> Route<S> {
             response_schema: self.response_schema.unwrap_or_else(Schema::empty),
             schema_resolver: self.schema_resolver,
             description: self.description,
-            strategy: self.strategy,
-            disposition: self.disposition,
-            queryable: self.queryable,
+            metadata: RouterMetadata {
+                strategy: self.strategy,
+                disposition: self.disposition.unwrap_or_default(),
+                queryable: self.queryable,
+            },
         }
     }
+}
+
+/// Declared, per-route metadata: the sync walk strategy, the write disposition,
+/// and whether reads accept `filter`/`fields`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct RouterMetadata {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strategy: Option<ListStrategy>,
+    pub disposition: Disposition,
+    pub queryable: bool,
 }
 
 /// A machine-readable description of one endpoint. Schemas are the native
@@ -675,6 +681,7 @@ pub struct EndpointInfo {
     pub body: Schema,
     /// Response schema.
     pub response: Schema,
+    pub metadata: RouterMetadata,
 }
 
 impl Serialize for EndpointInfo {
@@ -694,6 +701,7 @@ impl Serialize for EndpointInfo {
         };
         map.serialize_entry("body", &body)?;
         map.serialize_entry("response", &self.response.to_json_schema())?;
+        map.serialize_entry("metadata", &self.metadata)?;
         map.end()
     }
 }
@@ -748,7 +756,7 @@ impl<S: Send + Sync + 'static> Router<S> {
     /// `Get`), with its response schema resolved — running the dynamic resolver when
     /// the route has one. `None` if no read route matches.
     pub async fn resolve(&self, state: Arc<S>, path: &str) -> Option<Result<EndpointInfo>> {
-        let (raw_path, _) = split_query(path);
+        let (raw_path, query) = split_query(path);
         let read = |method: Method| {
             self.routes
                 .iter()
@@ -757,44 +765,14 @@ impl<S: Send + Sync + 'static> Router<S> {
         let route = read(Method::List).or_else(|| read(Method::Get))?;
         let mut info = route.info();
         if let Some(resolver) = &route.schema_resolver {
-            let params = route.pattern.match_path(raw_path).unwrap_or_default();
+            let mut params = route.pattern.match_path(raw_path).unwrap_or_default();
+            params.set_query(query);
             info.response = match resolver(state, params).await {
                 Ok(schema) => schema,
                 Err(e) => return Some(Err(e)),
             };
         }
         Some(Ok(info))
-    }
-
-    /// The declared [`ListStrategy`] of the `list` route matching `path`, or `None`
-    /// if no list route matches. The router only reports the signal; the external
-    /// sync layer is what interprets it.
-    pub fn strategy(&self, path: &str) -> Option<ListStrategy> {
-        let (raw_path, _) = split_query(path);
-        self.routes
-            .iter()
-            .find(|r| r.method == Method::List && r.pattern.match_path(raw_path).is_some())
-            .and_then(|r| r.strategy)
-    }
-
-    /// The declared write [`Disposition`] of the `list` route matching `path` —
-    /// whether a sink should merge (source re-emits updates) or append. Defaults to
-    /// `Append` when the route declares nothing or no list route matches.
-    pub fn disposition(&self, path: &str) -> Disposition {
-        let (raw_path, _) = split_query(path);
-        self.routes
-            .iter()
-            .find(|r| r.method == Method::List && r.pattern.match_path(raw_path).is_some())
-            .and_then(|r| r.disposition)
-            .unwrap_or_default()
-    }
-
-    pub fn queryable(&self, path: &str) -> bool {
-        let (raw_path, _) = split_query(path);
-        self.routes
-            .iter()
-            .find(|r| r.method == Method::List && r.pattern.match_path(raw_path).is_some())
-            .is_some_and(|r| r.queryable)
     }
 
     /// Dispatch an explicit verb: find the route matching both `path` and
@@ -920,7 +898,7 @@ impl<S: Send + Sync + 'static> Router<S> {
 
     pub fn validate(&self) -> anyhow::Result<()> {
         for route in &self.routes {
-            if matches!(route.method, Method::List) && route.strategy.is_none() {
+            if matches!(route.method, Method::List) && route.metadata.strategy.is_none() {
                 anyhow::bail!(
                     "list method {:?} does not implement strategy",
                     route.pattern.as_str()

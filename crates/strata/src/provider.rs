@@ -13,8 +13,7 @@ use serde_json::{Value, json};
 
 use crate::catalog::Catalog;
 use crate::config::ProviderConfig;
-use crate::dataset::{DataStream, Disposition};
-use crate::page::ListStrategy;
+use crate::dataset::DataStream;
 use crate::router::{Body, BoxFuture, EndpointInfo, Method, Response, Router};
 
 /// Implemented by each concrete provider. Knows its state type and how to wire
@@ -45,15 +44,6 @@ pub trait ProviderObject: Send + Sync {
     /// The read endpoint matching a concrete `path`, with its response schema
     /// resolved (running a dynamic resolver if the route has one).
     fn resolve<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<EndpointInfo>>;
-    /// The declared [`ListStrategy`] of the `list` route matching `path`, for the
-    /// external sync layer to drive its walk. `None` if no list route matches.
-    fn strategy(&self, path: &str) -> Option<ListStrategy>;
-    /// The declared write [`Disposition`] of the `list` route matching `path` —
-    /// whether a pipe should merge (source re-emits updates) or append. Defaults to
-    /// `Append`.
-    fn disposition(&self, path: &str) -> Disposition;
-    // TODO: Make this items just metadata map on the route
-    fn queryable(&self, path: &str) -> bool;
     /// Auto-pick the `List` read by path and return it as a [`DataStream`] — the
     /// data plane, for callers that consume the Arrow stream (pipe, CLI, Flight
     /// `do_get`). The router loops the provider's single-page handler internally.
@@ -100,18 +90,6 @@ where
                 .await
                 .ok_or_else(|| anyhow!("no endpoint matches `{path}`"))?
         })
-    }
-
-    fn strategy(&self, path: &str) -> Option<ListStrategy> {
-        self.router.strategy(path)
-    }
-
-    fn disposition(&self, path: &str) -> Disposition {
-        self.router.disposition(path)
-    }
-
-    fn queryable(&self, path: &str) -> bool {
-        self.router.queryable(path)
     }
 
     fn read<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<DataStream>> {

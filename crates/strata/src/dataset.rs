@@ -9,6 +9,7 @@
 use anyhow::{Result, bail};
 use futures::stream::{BoxStream, StreamExt};
 use schema::Schema;
+use serde::Serialize;
 use serde_json::Value;
 
 use crate::page::Cursor;
@@ -17,7 +18,7 @@ use crate::record::Records;
 /// How a sink should apply a written dataset. Rides as metadata on the existing
 /// `put` verb (the reserved `disposition` query param) rather than a new verb, so
 /// every sink shares one write surface.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
 pub enum Disposition {
     /// Insert every row (the historical behavior). Re-running adds duplicates.
     #[default]
