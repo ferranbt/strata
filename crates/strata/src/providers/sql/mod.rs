@@ -265,7 +265,8 @@ pub trait SqlSource: Send + Sync + 'static {
                 .path("/tables/:table")
                 .list_records(table_data::<Self>)
                 .data_type(table_data_schema::<Self>)
-                .strategy(ListStrategy::Offset),
+                .strategy(ListStrategy::Offset)
+                .queryable(),
         );
         r.add(Route::new().path("/tables/:table").put(write_table::<Self>));
     }

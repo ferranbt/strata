@@ -310,6 +310,9 @@ struct Entry<S> {
     /// re-emits updated elements (upsert on key), else `Append`. Independent of the
     /// walk `strategy`.
     disposition: Option<Disposition>,
+    /// Whether this list route accepts the `filter`/`fields` read params — the
+    /// signal a query surface (GraphQL) reads to expose `where` + projection.
+    queryable: bool,
 }
 
 /// Erase a `get` handler `(Arc<S>, Params) -> T`: an entity-plane read. The result
@@ -469,6 +472,7 @@ pub struct Route<S> {
     description: Option<String>,
     strategy: Option<ListStrategy>,
     disposition: Option<Disposition>,
+    queryable: bool,
 }
 
 impl<S: Send + Sync + 'static> Default for Route<S> {
@@ -483,6 +487,7 @@ impl<S: Send + Sync + 'static> Default for Route<S> {
             description: None,
             strategy: None,
             disposition: None,
+            queryable: false,
         }
     }
 }
@@ -522,6 +527,11 @@ impl<S: Send + Sync + 'static> Route<S> {
     /// Independent of the walk [`strategy`](Self::strategy).
     pub fn writes(mut self, disposition: Disposition) -> Self {
         self.disposition = Some(disposition);
+        self
+    }
+
+    pub fn queryable(mut self) -> Self {
+        self.queryable = true;
         self
     }
 
@@ -630,6 +640,7 @@ impl<S: Send + Sync + 'static> Route<S> {
             description: self.description,
             strategy: self.strategy,
             disposition: self.disposition,
+            queryable: self.queryable,
         }
     }
 }
@@ -761,6 +772,14 @@ impl<S: Send + Sync + 'static> Router<S> {
             .find(|r| r.method == Method::List && r.pattern.match_path(raw_path).is_some())
             .and_then(|r| r.disposition)
             .unwrap_or_default()
+    }
+
+    pub fn queryable(&self, path: &str) -> bool {
+        let (raw_path, _) = split_query(path);
+        self.routes
+            .iter()
+            .find(|r| r.method == Method::List && r.pattern.match_path(raw_path).is_some())
+            .is_some_and(|r| r.queryable)
     }
 
     /// Dispatch an explicit verb: find the route matching both `path` and

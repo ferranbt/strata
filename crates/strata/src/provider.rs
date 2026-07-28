@@ -57,6 +57,8 @@ pub trait ProviderObject: Send + Sync {
     /// whether a pipe should merge (source re-emits updates) or append. Defaults to
     /// `Append`.
     fn disposition(&self, path: &str) -> Disposition;
+    // TODO: Make this items just metadata map on the route
+    fn queryable(&self, path: &str) -> bool;
     /// Auto-pick the `List` read by path and return it as a [`DataStream`] — the
     /// data plane, for callers that consume the Arrow stream (pipe, CLI, Flight
     /// `do_get`). The router loops the provider's single-page handler internally.
@@ -119,6 +121,10 @@ where
 
     fn disposition(&self, path: &str) -> Disposition {
         self.router.disposition(path)
+    }
+
+    fn queryable(&self, path: &str) -> bool {
+        self.router.queryable(path)
     }
 
     fn read<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<DataStream>> {

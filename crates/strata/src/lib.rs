@@ -6,6 +6,7 @@ pub mod config;
 pub mod datagen;
 pub mod dataset;
 pub mod flight;
+pub mod graphql;
 pub mod harness;
 pub mod page;
 pub mod pipe;
