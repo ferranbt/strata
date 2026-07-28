@@ -84,12 +84,7 @@ where
     fn resolve<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<EndpointInfo>> {
         let state = self.state.clone();
         let path = path.to_string();
-        Box::pin(async move {
-            self.router
-                .resolve(state, &path)
-                .await
-                .ok_or_else(|| anyhow!("no endpoint matches `{path}`"))?
-        })
+        Box::pin(async move { self.router.resolve(state, &path).await })
     }
 
     fn read<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<DataStream>> {
