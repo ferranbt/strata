@@ -349,7 +349,7 @@ pub async fn table_data<S: SqlSource>(db: Arc<S>, p: Params) -> Result<RecordPag
     // projected schema governs what's returned. The cursor is resolved off the full
     // schema so ordering works even when the cursor column is projected away.
     // TODO: Select the table fields at the provider level itself.
-    let full = db.table_schema(name).await?;
+    let full = enrich(db.table_schema(name).await?, p.schema());
     let projection = get_projection(&p);
     let schema = project_schema(&full, projection.as_deref())?;
 
@@ -444,8 +444,22 @@ fn autodetect_cursor(schema: &Schema) -> Option<String> {
 
 /// The `.data_type()` resolver for `/tables/:table/data`.
 pub async fn table_data_schema<S: SqlSource>(db: Arc<S>, p: Params) -> Result<Schema> {
-    let full = db.table_schema(p.get("table")?).await?;
+    let full = enrich(db.table_schema(p.get("table")?).await?, p.schema());
     project_schema(&full, get_projection(&p).as_deref())
+}
+
+fn enrich(mut schema: Schema, annotated: Option<&Schema>) -> Schema {
+    let Some(annotated) = annotated else {
+        return schema;
+    };
+    for field in &mut schema.fields {
+        if let Some(source) = annotated.fields.iter().find(|f| f.name == field.name) {
+            for (key, value) in source.annotations.to_map() {
+                field.annotate(key, value);
+            }
+        }
+    }
+    schema
 }
 
 /// `put /tables/:table`: sink a [`DataStream`]. Decodes the `disposition` param and

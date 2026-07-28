@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use crate::catalog::Catalog;
 use crate::config::ProviderConfig;
 use crate::dataset::DataStream;
-use crate::router::{Body, BoxFuture, EndpointInfo, Method, Response, Router};
+use crate::router::{Body, BoxFuture, EndpointInfo, Method, Response, Router, SchemaSource};
 
 /// Implemented by each concrete provider. Knows its state type and how to wire
 /// its routes. This is the typed, ergonomic surface provider authors write.
@@ -36,9 +36,7 @@ pub trait Provider: Sized + Send + Sync + 'static {
 /// being an `async fn`.
 pub trait ProviderObject: Send + Sync {
     fn name(&self) -> &str;
-    /// Wire the mount-scoped [`Catalog`] into this provider's router, so its
-    /// handlers can read their own persisted annotations.
-    fn set_catalog(&mut self, catalog: Catalog);
+    fn set_schema_source(&mut self, source: Arc<dyn SchemaSource>);
     /// Every endpoint, statically described (dynamic resolvers not run).
     fn endpoints(&self) -> Vec<EndpointInfo>;
     /// The read endpoint matching a concrete `path`, with its response schema
@@ -73,8 +71,8 @@ where
         S::name()
     }
 
-    fn set_catalog(&mut self, catalog: Catalog) {
-        self.router.set_catalog(catalog);
+    fn set_schema_source(&mut self, source: Arc<dyn SchemaSource>) {
+        self.router.set_schema_source(source);
     }
 
     fn endpoints(&self) -> Vec<EndpointInfo> {
@@ -136,8 +134,16 @@ impl Registry {
 
     pub fn set_catalog(&mut self, db: database::Database) {
         for (mount, provider) in self.providers.iter_mut() {
-            provider.set_catalog(Catalog::new(db.clone(), mount.clone()));
+            provider.set_schema_source(Arc::new(Catalog::new(db.clone(), mount.clone())));
         }
+    }
+
+    pub fn set_schema_source(&mut self, mount: &str, source: Arc<dyn SchemaSource>) -> Result<()> {
+        self.providers
+            .get_mut(mount)
+            .ok_or_else(|| anyhow!("nothing mounted at `{mount}`"))?
+            .set_schema_source(source);
+        Ok(())
     }
 
     /// Look up a mounted provider by its mount point.
