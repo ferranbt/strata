@@ -114,9 +114,7 @@ const FILTER_PARAM: &str = "filter";
 /// field names (`?fields=id,name`). Absent means the whole row.
 const FIELDS_PARAM: &str = "fields";
 
-/// The requested column projection from `?fields=`, or `None` for the whole row.
-/// Blank entries are dropped; an all-blank list is treated as absent.
-fn projection(p: &Params) -> Option<Vec<String>> {
+fn get_projection(p: &Params) -> Option<Vec<String>> {
     let cols: Vec<String> = p
         .query(FIELDS_PARAM)?
         .split(',')
@@ -129,8 +127,7 @@ fn projection(p: &Params) -> Option<Vec<String>> {
 
 /// Narrow `schema` to the projected columns, preserving the schema's field order
 /// and erroring on an unknown column. Returns the full schema when nothing is
-/// projected. The full dataset schema stays the contract; this is the *result*
-/// schema of one projected read, which is always a subset of it.
+/// projected.
 fn project_schema(schema: &Schema, projection: Option<&[String]>) -> Result<Schema> {
     let Some(cols) = projection else {
         return Ok(schema.clone());
@@ -294,7 +291,7 @@ pub async fn table_data<S: SqlSource>(db: Arc<S>, p: Params) -> Result<RecordPag
     // schema so ordering works even when the cursor column is projected away.
     // TODO: Select the table fields at the provider level itself.
     let full = db.table_schema(name).await?;
-    let projection = projection(&p);
+    let projection = get_projection(&p);
     let schema = project_schema(&full, projection.as_deref())?;
 
     // Hydrate the request-time fields: page size and the resolved cursor column.
@@ -391,7 +388,7 @@ fn autodetect_cursor(schema: &Schema) -> Option<String> {
 /// matches the columns actually served (the result schema, not the full dataset).
 pub async fn table_data_schema<S: SqlSource>(db: Arc<S>, p: Params) -> Result<Schema> {
     let full = db.table_schema(p.get("table")?).await?;
-    project_schema(&full, projection(&p).as_deref())
+    project_schema(&full, get_projection(&p).as_deref())
 }
 
 /// `put /tables/:table`: sink a [`DataStream`]. Decodes the `disposition` param and
