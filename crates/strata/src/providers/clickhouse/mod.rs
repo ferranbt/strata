@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use crate::dataset::{Dataset, Disposition};
 use crate::provider::Provider;
-use crate::providers::sql::{self, SqlCursor, SqlError, SqlSource, WriteResult, quote_str};
+use crate::providers::sql::{self, Filter, SqlCursor, SqlError, SqlSource, WriteResult, quote_str};
 use crate::router::Router;
 
 #[config]
@@ -115,17 +115,23 @@ impl SqlSource for Clickhouse {
         Ok(Schema::new(columns))
     }
 
-    async fn table_rows(&self, table: &str, cursor: &SqlCursor) -> Result<Vec<Value>> {
+    async fn table_rows(
+        &self,
+        table: &str,
+        cursor: &SqlCursor,
+        filter: Option<&Filter>,
+    ) -> Result<Vec<Value>> {
         // `FINAL` collapses a ReplacingMergeTree's duplicate keys at query time;
         // `output_format_json_quote_64bit_integers = 0` keeps Int64/UInt64 as JSON
         // numbers rather than ClickHouse's default quoted strings. `ORDER BY` must
         // precede `SETTINGS`/`FORMAT`.
+        let where_ = sql::where_clause(filter, '`')?;
         let order = match &cursor.cursor {
             Some(col) => format!("ORDER BY {} ASC ", quote_ident(col)),
             None => String::new(),
         };
         let sql = format!(
-            "SELECT * FROM {} FINAL {order}LIMIT {} OFFSET {} \
+            "SELECT * FROM {} FINAL {where_}{order}LIMIT {} OFFSET {} \
              SETTINGS output_format_json_quote_64bit_integers = 0 FORMAT JSONEachRow",
             quote_ident(table),
             cursor.limit,
@@ -342,6 +348,7 @@ mod tests {
         sql::suite::merge_overwrites(&client).await?;
         sql::suite::lists_tables_and_schema(&client).await?;
         sql::suite::write_then_read_paginates_by_cursor(&client).await?;
+        sql::suite::filters_rows(&client).await?;
         Ok(())
     }
 }

@@ -8,7 +8,7 @@ use sqlx::mysql::{MySqlArguments, MySqlPool};
 use crate::dataset::{Dataset, Disposition};
 use crate::provider::Provider;
 use crate::providers::sql::{
-    self, SqlCursor, SqlError, SqlSource, WriteResult, is_table_not_found, quote_str,
+    self, Filter, SqlCursor, SqlError, SqlSource, WriteResult, is_table_not_found, quote_str,
 };
 use crate::router::Router;
 
@@ -99,7 +99,12 @@ impl SqlSource for Mysql {
         Ok(Schema::new(fields))
     }
 
-    async fn table_rows(&self, table: &str, cursor: &SqlCursor) -> Result<Vec<Value>> {
+    async fn table_rows(
+        &self,
+        table: &str,
+        cursor: &SqlCursor,
+        filter: Option<&Filter>,
+    ) -> Result<Vec<Value>> {
         let pool = self.connect().await?;
         let schema = self.table_schema(table).await?;
         // `JSON_OBJECT('c1', `c1`, …)` turns each row into a JSON object; CAST to
@@ -110,13 +115,14 @@ impl SqlSource for Mysql {
             .map(|c| format!("{}, {}", quote_str(&c.name), quote_ident(&c.name)))
             .collect::<Vec<_>>()
             .join(", ");
+        let where_ = sql::where_clause(filter, '`')?;
         let order = match &cursor.cursor {
             Some(col) => format!("ORDER BY {} ASC ", quote_ident(col)),
             None => String::new(),
         };
         let sql = format!(
             "SELECT CAST(JSON_OBJECT({obj_args}) AS CHAR) AS `row` FROM {} \
-             {order}LIMIT {} OFFSET {}",
+             {where_}{order}LIMIT {} OFFSET {}",
             quote_ident(table),
             cursor.limit,
             cursor.offset,
@@ -377,6 +383,7 @@ mod tests {
         sql::suite::merge_overwrites(&client).await?;
         sql::suite::lists_tables_and_schema(&client).await?;
         sql::suite::write_then_read_paginates_by_cursor(&client).await?;
+        sql::suite::filters_rows(&client).await?;
         Ok(())
     }
 }
