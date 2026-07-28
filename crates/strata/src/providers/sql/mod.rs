@@ -329,9 +329,16 @@ pub async fn list_tables<S: SqlSource>(db: Arc<S>, _p: Params) -> Result<Page<Ta
 pub async fn table_get<S: SqlSource>(db: Arc<S>, p: Params) -> Result<Value> {
     let table = p.get("table")?;
     let key = p.get("id")?;
-    db.get_row(table, key)
+    let mut row = db
+        .get_row(table, key)
         .await?
-        .ok_or_else(|| anyhow!("no row with key `{key}` in table `{table}`"))
+        .ok_or_else(|| anyhow!("no row with key `{key}` in table `{table}`"))?;
+    if let Some(fields) = get_projection(&p)
+        && let Value::Object(map) = &mut row
+    {
+        map.retain(|k, _| fields.contains(k));
+    }
+    Ok(row)
 }
 
 /// `list_records /tables/:table/data`: a page of a table's rows as typed Arrow
@@ -721,6 +728,9 @@ pub mod suite {
         let row: Row = client.get("/tables/getone/2").await?;
         assert_eq!(row.id, 2);
         assert_eq!(row.name, "b");
+
+        let projected: RowProjected = client.get("/tables/getone/2?fields=name").await?;
+        assert_eq!(projected.name, "b");
         Ok(())
     }
 }
