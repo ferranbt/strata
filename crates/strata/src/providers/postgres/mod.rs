@@ -5,7 +5,9 @@ use tokio_postgres::NoTls;
 
 use crate::dataset::{Dataset, Disposition};
 use crate::provider::Provider;
-use crate::providers::sql::{self, SqlCursor, SqlError, SqlSource, WriteResult, is_table_not_found};
+use crate::providers::sql::{
+    self, Filter, SqlCursor, SqlError, SqlSource, WriteResult, is_table_not_found,
+};
 use crate::router::Router;
 use config_macro::config;
 
@@ -92,15 +94,21 @@ impl SqlSource for Postgres {
         Ok(Schema::new(columns))
     }
 
-    async fn table_rows(&self, table: &str, cursor: &SqlCursor) -> Result<Vec<Value>> {
+    async fn table_rows(
+        &self,
+        table: &str,
+        cursor: &SqlCursor,
+        filter: Option<&Filter>,
+    ) -> Result<Vec<Value>> {
         let client = self.connect().await?;
         let (namespace, name) = resolve_table(&client, table).await?;
+        let where_ = sql::where_clause(filter, '"')?;
         let order = match &cursor.cursor {
             Some(col) => format!("ORDER BY {} ASC ", quote_ident(col)),
             None => String::new(),
         };
         let sql = format!(
-            "SELECT to_jsonb(t) AS row FROM {}.{} t {order}LIMIT {} OFFSET {}",
+            "SELECT to_jsonb(t) AS row FROM {}.{} t {where_}{order}LIMIT {} OFFSET {}",
             quote_ident(&namespace),
             quote_ident(&name),
             cursor.limit,
@@ -346,6 +354,7 @@ mod tests {
         sql::suite::merge_overwrites(&client).await?;
         sql::suite::lists_tables_and_schema(&client).await?;
         sql::suite::write_then_read_paginates_by_cursor(&client).await?;
+        sql::suite::filters_rows(&client).await?;
         Ok(())
     }
 }

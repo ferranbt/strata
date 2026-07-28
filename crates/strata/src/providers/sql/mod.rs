@@ -28,6 +28,10 @@ use crate::provider::Provider;
 use crate::record::{RecordPage, Records, stringify_text_columns};
 use crate::router::{Params, Route, Router};
 
+mod filter;
+use filter::parse_filter;
+pub use filter::{Filter, Op, where_clause};
+
 /// A row of the `/tables` listing: a table's name.
 #[derive(Debug, Serialize, Deserialize, HasSchema)]
 pub struct TableName {
@@ -103,6 +107,9 @@ pub fn quote_str(s: &str) -> String {
 const DEFAULT_LIMIT: u32 = 10;
 const MAX_LIMIT: u32 = 1000;
 
+/// Reserved read param carrying a JSON-encoded [`Filter`], decoded like the cursor.
+const FILTER_PARAM: &str = "filter";
+
 /// The page cursor for `/tables/:table/data`.
 /// When `cursor` (a column name) is set the provider orders by it
 /// (`ORDER BY cursor ASC`) so paging is deterministic.
@@ -132,11 +139,14 @@ pub trait SqlSource: Send + Sync + 'static {
 
     /// One page of `<table>`'s rows as JSON objects (one object per row), per the
     /// [`SqlCursor`]: ordered by `cursor.cursor` when set (else engine order), and
-    /// windowed by `cursor.limit`/`cursor.offset`.
+    /// windowed by `cursor.limit`/`cursor.offset`. When `filter` is set, restrict
+    /// the rows to it, compiling the predicate with [`where_clause`] and the
+    /// dialect's identifier quote.
     fn table_rows(
         &self,
         table: &str,
         cursor: &SqlCursor,
+        filter: Option<&Filter>,
     ) -> impl Future<Output = Result<Vec<Value>>> + Send;
 
     /// Reconcile `<table>` with `schema`, creating it when absent (with the schema's
@@ -234,7 +244,9 @@ pub async fn table_data<S: SqlSource>(db: Arc<S>, p: Params) -> Result<RecordPag
     cursor.limit = p.limit(DEFAULT_LIMIT, MAX_LIMIT);
     cursor.cursor = resolve_cursor(&p, &schema);
 
-    let mut rows = db.table_rows(name, &cursor).await?;
+    let filter = p.query(FILTER_PARAM).map(parse_filter).transpose()?;
+
+    let mut rows = db.table_rows(name, &cursor, filter.as_ref()).await?;
     stringify_text_columns(&schema, &mut rows);
     normalize_temporals(&schema, &mut rows);
     let next = next_cursor(&cursor, rows.len())?;
@@ -414,9 +426,7 @@ pub mod suite {
         client: &Client<S>,
     ) -> Result<()> {
         let generator = crate::datagen::Generator::new(&Event::schema())?;
-        let result: WriteResult = client
-            .put("/tables/events", generator.dataset(20)?)
-            .await?;
+        let result: WriteResult = client.put("/tables/events", generator.dataset(20)?).await?;
         assert!(result.created);
         assert_eq!(result.rows_written, 20);
 
@@ -483,6 +493,58 @@ pub mod suite {
         assert_eq!(
             rows[0].name, "b",
             "merge must overwrite the non-key columns"
+        );
+        Ok(())
+    }
+
+    /// A `?filter=` predicate restricts the rows a `list` returns, compiled to a SQL
+    /// `WHERE`. Exercises an AND of a range with a nested OR of equalities against
+    /// the real dialect: `id >= 2 AND (name = 'b' OR name = 'd')`.
+    pub async fn filters_rows<S: Provider>(client: &Client<S>) -> Result<()> {
+        let rows = [
+            Row {
+                id: 1,
+                name: "a".into(),
+            },
+            Row {
+                id: 2,
+                name: "b".into(),
+            },
+            Row {
+                id: 3,
+                name: "c".into(),
+            },
+            Row {
+                id: 4,
+                name: "d".into(),
+            },
+        ];
+        let _: WriteResult = client.put("/tables/filtered", Dataset::of(&rows)?).await?;
+
+        let predicate = serde_json::json!({
+            "and": [
+                { "cmp": { "field": "id", "op": "gte", "value": 2 } },
+                { "or": [
+                    { "cmp": { "field": "name", "op": "eq", "value": "b" } },
+                    { "cmp": { "field": "name", "op": "eq", "value": "d" } }
+                ] }
+            ]
+        });
+
+        // TODO: List does not have a request helper
+        let encoded = urlencoding::encode(&predicate.to_string()).into_owned();
+
+        let mut stream = client
+            .list(&format!("/tables/filtered?filter={encoded}"))
+            .await?;
+        let mut found: Vec<Row> = stream.next().await?;
+        found.sort_by_key(|r| r.id);
+
+        let names: Vec<&str> = found.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["b", "d"],
+            "filter must return only rows matching `id >= 2 AND (name = b OR name = d)`"
         );
         Ok(())
     }
