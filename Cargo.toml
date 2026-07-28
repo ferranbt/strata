@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = ["crates/strata", "crates/schema", "crates/schema-macro", "crates/config-macro", "crates/database", "crates/strata-types", "crates/http-client", "crates/dockertest"]
+default-members = ["crates/strata"]
+
+[workspace.dependencies]
+schema = { path = "crates/schema" }
+schema-macro = { path = "crates/schema-macro" }
+config-macro = { path = "crates/config-macro" }
+strata-types = { path = "crates/strata-types" }
+database = { path = "crates/database" }
+http-client = { path = "crates/http-client" }
+http = "1"

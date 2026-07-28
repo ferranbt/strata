@@ -1,0 +1,6 @@
+/target
+.env
+notes.md
+strata.toml
+/warehouse
+/data

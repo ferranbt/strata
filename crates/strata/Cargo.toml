@@ -1,0 +1,46 @@
+[package]
+name = "strata"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_urlencoded = "0.7"
+anyhow = "1"
+dotenvy = "0.15"
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
+urlencoding = "2"
+schema.workspace = true
+config-macro.workspace = true
+strata-types.workspace = true
+database.workspace = true
+http-client.workspace = true
+http.workspace = true
+arrow = "58"
+arrow-flight = "58"
+tonic = { version = "0.14", features = ["transport"] }
+futures = "0.3"
+uuid = { version = "1", features = ["v4"] }
+serde_arrow = { version = "0.14.2", features = ["arrow-58"] }
+tokio-postgres = { version = "0.7.18", features = ["with-serde_json-1"] }
+iceberg = "0.10"
+iceberg-catalog-sql = "0.10"
+chrono = "0.4"
+base64 = "0.22"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "postgres", "mysql"] }
+# Arrow crates the iceberg provider imports by name. Same version as
+# `arrow`/`arrow-flight` (58) — iceberg 0.10 is on Arrow 58, so the whole crate is
+# on one Arrow version and record batches pass through without conversion.
+parquet = "58"
+arrow-array = "58"
+arrow-schema = "58"
+toml = "1"
+feed-rs = "2.3.1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+eyre = "0.6.12"
+
+[dev-dependencies]
+dockertest = { path = "../dockertest" }
