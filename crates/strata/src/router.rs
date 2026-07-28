@@ -519,6 +519,17 @@ impl<S: Send + Sync + 'static> Route<S> {
         self
     }
 
+    pub fn get_records<F, Fut>(mut self, handler: F) -> Self
+    where
+        F: Fn(Arc<S>, Params) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<Value>> + Send + 'static,
+    {
+        self.method = Method::Get;
+        self.handler = Some(erase(handler));
+        self.response_schema = None;
+        self
+    }
+
     pub fn strategy(mut self, strategy: ListStrategy) -> Self {
         self.strategy = Some(strategy);
         self

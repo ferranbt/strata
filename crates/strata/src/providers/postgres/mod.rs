@@ -82,13 +82,27 @@ impl SqlSource for Postgres {
         if rows.is_empty() {
             return Err(SqlError::TableNotFound(table.to_string()).into());
         }
+        let pk_rows = client
+            .query(
+                "SELECT a.attname AS name FROM pg_index i \
+                 JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) \
+                 WHERE i.indrelid = to_regclass($1) AND i.indisprimary",
+                &[&table],
+            )
+            .await?;
+        let keys: std::collections::HashSet<String> =
+            pk_rows.iter().map(|r| r.get::<_, String>("name")).collect();
         let columns = rows
             .iter()
             .map(|r| {
                 let name: String = r.get("column_name");
                 let sql_type: String = r.get("data_type");
                 let nullable = r.get::<_, String>("is_nullable") == "YES";
-                Ok(Field::new(name, pg_to_data_type(&sql_type)?, nullable))
+                let mut field = Field::new(name.clone(), pg_to_data_type(&sql_type)?, nullable);
+                if keys.contains(&name) {
+                    field.annotate(Field::KEY, "true");
+                }
+                Ok(field)
             })
             .collect::<Result<_>>()?;
         Ok(Schema::new(columns))
@@ -356,6 +370,7 @@ mod tests {
         sql::suite::write_then_read_paginates_by_cursor(&client).await?;
         sql::suite::filters_rows(&client).await?;
         sql::suite::projects_columns(&client).await?;
+        sql::suite::gets_single_row(&client).await?;
         Ok(())
     }
 }
