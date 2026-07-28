@@ -62,12 +62,13 @@ async fn build_schema(registry: &Arc<Registry>) -> Result<Schema> {
         for table in tables(registry, &mount).await {
             let path = format!("/tables/{table}");
             let provider = registry.get(&mount)?;
-            if !provider.queryable(&path) {
-                continue;
-            }
-            let Ok(row_schema) = provider.resolve_schema(&path).await else {
+            let Ok(endpoint) = provider.resolve(&path).await else {
                 continue;
             };
+            if !endpoint.metadata.queryable {
+                continue;
+            }
+            let row_schema = endpoint.response;
             let type_name = format!("{mount}_{table}");
             objects.push(row_object(&type_name, &row_schema));
             query = query.field(table_field(

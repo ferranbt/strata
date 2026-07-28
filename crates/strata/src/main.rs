@@ -168,8 +168,8 @@ async fn run() -> Result<()> {
         Command::List {
             provider: Some(name),
         } => {
-            for route in registry.get(&name)?.routes() {
-                println!("{route}");
+            for endpoint in registry.get(&name)?.endpoints() {
+                println!("{}", endpoint.path);
             }
         }
         Command::Schema { provider: None } => {
@@ -248,14 +248,14 @@ async fn run() -> Result<()> {
                     // unreachable at startup shouldn't stop `serve`.
                     match registry
                         .get(&pipe.source.mount)?
-                        .resolve_schema(&pipe.source.path)
+                        .resolve(&pipe.source.path)
                         .await
                     {
-                        Ok(schema) => {
+                        Ok(endpoint) => {
                             for ep in [&pipe.source, &pipe.destination] {
                                 let ep =
                                     strata_types::Endpoint::new(&ep.mount, strip_query(&ep.path));
-                                db.upsert_source_schema(&ep, &schema).await?;
+                                db.upsert_source_schema(&ep, &endpoint.response).await?;
                             }
                         }
                         Err(e) => tracing::warn!(

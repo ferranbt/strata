@@ -19,7 +19,8 @@ use sync::Progress;
 pub async fn run_pass<S: PipeStore>(registry: &Registry, store: &S, pipe: &mut Pipe) -> Result<()> {
     let src = registry.get(&pipe.source.mount)?;
     let dst = registry.get(&pipe.destination.mount)?;
-    let strategy = src.strategy(&pipe.source.path).ok_or_else(|| {
+    let meta = src.resolve(&pipe.source.path).await?.metadata;
+    let strategy = meta.strategy.ok_or_else(|| {
         anyhow!(
             "source `{}{}` is not a list endpoint (no sync strategy)",
             pipe.source.mount,
@@ -36,7 +37,7 @@ pub async fn run_pass<S: PipeStore>(registry: &Registry, store: &S, pipe: &mut P
     // The source declares how a sink should apply its rows (merge if it re-emits
     // updates, else append). The sink still skips existing keys on append.
     let dst_path = WriteRequest::new(&pipe.destination.path)
-        .with_disposition(src.disposition(&pipe.source.path))
+        .with_disposition(meta.disposition)
         .path();
     let mut chunks = stream.chunks;
 

@@ -210,12 +210,6 @@ fn split_path(path: &str) -> impl Iterator<Item = &str> {
     path.split('/').filter(|s| !s.is_empty())
 }
 
-/// Split a call path into `(path, query)` at the first `?`. The query (without
-/// the `?`) is `""` when absent.
-fn split_query(path: &str) -> (&str, &str) {
-    path.split_once('?').unwrap_or((path, ""))
-}
-
 /// The verb an endpoint answers. Reads (`Get`, `List`) take no body. The write
 /// verbs take a body: `Create` a single typed entity (provider assigns
 /// identity); `Put` a whole [`Dataset`] (schema + rows) — the write-dual of
@@ -305,14 +299,22 @@ struct Entry<S> {
     schema_resolver: Option<SchemaResolver<S>>,
     /// Human-readable description of the endpoint, for introspection.
     description: Option<String>,
-    strategy: Option<ListStrategy>,
-    /// How a sink should apply this source's rows when piped: `Merge` if the source
-    /// re-emits updated elements (upsert on key), else `Append`. Independent of the
-    /// walk `strategy`.
-    disposition: Option<Disposition>,
-    /// Whether this list route accepts the `filter`/`fields` read params — the
-    /// signal a query surface (GraphQL) reads to expose `where` + projection.
-    queryable: bool,
+    metadata: RouterMetadata,
+}
+
+impl<S> Entry<S> {
+    /// Static description of this route (dynamic resolver not run).
+    fn info(&self) -> EndpointInfo {
+        EndpointInfo {
+            method: self.method,
+            path: self.pattern.as_str().to_string(),
+            description: self.description.clone(),
+            params: self.pattern.param_names(),
+            body: self.body_schema.clone(),
+            response: self.response_schema.clone(),
+            metadata: self.metadata.clone(),
+        }
+    }
 }
 
 /// Erase a `get` handler `(Arc<S>, Params) -> T`: an entity-plane read. The result
@@ -522,9 +524,6 @@ impl<S: Send + Sync + 'static> Route<S> {
         self
     }
 
-    /// Declare how a sink should apply this source's rows when piped: `Merge` if the
-    /// source re-emits updated elements (upsert on key), else the default `Append`.
-    /// Independent of the walk [`strategy`](Self::strategy).
     pub fn writes(mut self, disposition: Disposition) -> Self {
         self.disposition = Some(disposition);
         self
@@ -606,8 +605,6 @@ impl<S: Send + Sync + 'static> Route<S> {
         self
     }
 
-    /// Attach a human-readable description of the endpoint, surfaced in the
-    /// introspection output (`strata schema`) alongside its method and schemas.
     pub fn description(mut self, description: impl Into<String>) -> Self {
         self.description = Some(description.into());
         self
@@ -638,29 +635,58 @@ impl<S: Send + Sync + 'static> Route<S> {
             response_schema: self.response_schema.unwrap_or_else(Schema::empty),
             schema_resolver: self.schema_resolver,
             description: self.description,
-            strategy: self.strategy,
-            disposition: self.disposition,
-            queryable: self.queryable,
+            metadata: RouterMetadata {
+                strategy: self.strategy,
+                disposition: self.disposition.unwrap_or_default(),
+                queryable: self.queryable,
+            },
         }
     }
 }
 
-/// A machine-readable description of one endpoint, for introspection.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct RouterMetadata {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strategy: Option<ListStrategy>,
+    pub disposition: Disposition,
+    pub queryable: bool,
+}
+
+#[derive(Debug, Clone)]
 pub struct EndpointInfo {
-    /// The verb this endpoint answers: `get`, `list`, `create`, or `upsert`.
     pub method: Method,
     /// The route pattern, e.g. `/repos/:owner/:name`.
     pub path: String,
-    /// Human-readable description of the endpoint, if declared. Omitted when unset.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     /// Names of the path captures the endpoint takes.
     pub params: Vec<String>,
-    /// JSON Schema of the request body, for write verbs. `null` for reads.
-    pub body: Value,
-    /// JSON Schema of the value this endpoint returns.
-    pub response: Value,
+    /// Request-body schema (empty for reads).
+    pub body: Schema,
+    /// Response schema.
+    pub response: Schema,
+    pub metadata: RouterMetadata,
+}
+
+impl Serialize for EndpointInfo {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(None)?;
+        map.serialize_entry("method", &self.method)?;
+        map.serialize_entry("path", &self.path)?;
+        if let Some(description) = &self.description {
+            map.serialize_entry("description", description)?;
+        }
+        map.serialize_entry("params", &self.params)?;
+        let body = if self.method.is_write() {
+            self.body.to_json_schema()
+        } else {
+            Value::Null
+        };
+        map.serialize_entry("body", &body)?;
+        map.serialize_entry("response", &self.response.to_json_schema())?;
+        map.serialize_entry("metadata", &self.metadata)?;
+        map.end()
+    }
 }
 
 /// Maps route patterns to handlers for one provider whose state is `S`.
@@ -695,91 +721,46 @@ impl<S: Send + Sync + 'static> Router<S> {
         self.routes.push(route.into_entry());
     }
 
-    /// All registered patterns, in registration order (for `strata list`).
-    pub fn patterns(&self) -> Vec<String> {
-        self.routes
-            .iter()
-            .map(|r| r.pattern.as_str().to_string())
-            .collect()
-    }
-
-    /// Describe every endpoint (path, params, response schema) for introspection.
+    /// Describe every endpoint (static schemas; dynamic resolvers not run) for
+    /// introspection, the CLI listing, and Flight `ListFlights`.
     pub fn endpoints(&self) -> Vec<EndpointInfo> {
-        self.routes
-            .iter()
-            .map(|r| EndpointInfo {
-                method: r.method,
-                path: r.pattern.as_str().to_string(),
-                description: r.description.clone(),
-                params: r.pattern.param_names(),
-                body: if r.method.is_write() {
-                    r.body_schema.to_json_schema()
-                } else {
-                    Value::Null
-                },
-                response: r.response_schema.to_json_schema(),
-            })
-            .collect()
+        self.routes.iter().map(Entry::info).collect()
     }
 
-    /// Static response `DataType` of every route, paired with its pattern (for
-    /// Flight `ListFlights`). Ignores dynamic resolvers.
-    pub fn schemas(&self) -> Vec<(String, Schema)> {
-        self.routes
-            .iter()
-            .map(|r| (r.pattern.as_str().to_string(), r.response_schema.clone()))
-            .collect()
+    pub async fn resolve(&self, state: Arc<S>, path: &str) -> Result<EndpointInfo> {
+        // Prefer the List (data-plane) schema; fall back to Get for entity-only paths.
+        let (route, params) = match self.match_route(path, Method::List).await {
+            Ok(hit) => hit,
+            Err(_) => self.match_route(path, Method::Get).await?,
+        };
+        let mut info = route.info();
+        if let Some(resolver) = &route.schema_resolver {
+            info.response = resolver(state, params).await?;
+        }
+        Ok(info)
     }
 
-    /// The `DataType` of the *entity* at `path`. Resolves a **read** route only:
-    /// the data plane (`List` — exactly what [`dispatch_read`](Self::dispatch_read)
-    /// streams) if there is one, else the entity plane (`Get`)
-    pub async fn resolve_schema(&self, state: Arc<S>, path: &str) -> Option<Result<Schema>> {
-        let (raw_path, _) = split_query(path);
-        let read = |method: Method| {
+    async fn match_route(&self, path: &str, method: Method) -> Result<(&Entry<S>, Params)> {
+        let (raw_path, query) = path.split_once('?').unwrap_or((path, ""));
+        for route in &self.routes {
+            if route.method == method
+                && let Some(mut params) = route.pattern.match_path(raw_path)
+            {
+                params.set_query(query);
+                if let Some(source) = &self.schema_source {
+                    params.schema = source.schema(raw_path.to_string()).await?;
+                }
+                return Ok((route, params));
+            }
+        }
+        bail!(
+            "no {method} route matches `{raw_path}`. known routes:\n  {}",
             self.routes
                 .iter()
-                .find(move |r| r.method == method && r.pattern.match_path(raw_path).is_some())
-        };
-        let route = read(Method::List).or_else(|| read(Method::Get))?;
-        match &route.schema_resolver {
-            Some(resolver) => {
-                let params = route.pattern.match_path(raw_path).unwrap_or_default();
-                Some(resolver(state, params).await)
-            }
-            None => Some(Ok(route.response_schema.clone())),
-        }
-    }
-
-    /// The declared [`ListStrategy`] of the `list` route matching `path`, or `None`
-    /// if no list route matches. The router only reports the signal; the external
-    /// sync layer is what interprets it.
-    pub fn strategy(&self, path: &str) -> Option<ListStrategy> {
-        let (raw_path, _) = split_query(path);
-        self.routes
-            .iter()
-            .find(|r| r.method == Method::List && r.pattern.match_path(raw_path).is_some())
-            .and_then(|r| r.strategy)
-    }
-
-    /// The declared write [`Disposition`] of the `list` route matching `path` —
-    /// whether a sink should merge (source re-emits updates) or append. Defaults to
-    /// `Append` when the route declares nothing or no list route matches.
-    pub fn disposition(&self, path: &str) -> Disposition {
-        let (raw_path, _) = split_query(path);
-        self.routes
-            .iter()
-            .find(|r| r.method == Method::List && r.pattern.match_path(raw_path).is_some())
-            .and_then(|r| r.disposition)
-            .unwrap_or_default()
-    }
-
-    pub fn queryable(&self, path: &str) -> bool {
-        let (raw_path, _) = split_query(path);
-        self.routes
-            .iter()
-            .find(|r| r.method == Method::List && r.pattern.match_path(raw_path).is_some())
-            .is_some_and(|r| r.queryable)
+                .map(|r| r.pattern.as_str())
+                .collect::<Vec<_>>()
+                .join("\n  ")
+        )
     }
 
     /// Dispatch an explicit verb: find the route matching both `path` and
@@ -792,8 +773,8 @@ impl<S: Send + Sync + 'static> Router<S> {
         path: &str,
         body: Option<Body>,
     ) -> Result<Response> {
-        self.run(state, path, body, move |m| m == method, &method.to_string())
-            .await
+        let (route, params) = self.match_route(path, method).await?;
+        (route.handler)(state, params, body).await
     }
 
     /// Auto-pick the `List` route matching `path` and return it as a real
@@ -804,53 +785,22 @@ impl<S: Send + Sync + 'static> Router<S> {
     /// each [`Chunk`] carrying its page's cursor as a checkpoint. Entity reads
     /// (`get`) are named explicitly via [`Router::dispatch`]; they aren't streams.
     pub async fn dispatch_read(&self, state: Arc<S>, path: &str) -> Result<DataStream> {
-        let (raw_path, query) = split_query(path);
-        let route = self
-            .routes
-            .iter()
-            .find(|r| r.method == Method::List && r.pattern.match_path(raw_path).is_some())
-            .ok_or_else(|| {
-                anyhow!(
-                    "no list route matches `{raw_path}`. known routes:\n  {}",
-                    self.patterns().join("\n  ")
-                )
-            })?;
+        let (route, base) = self.match_route(path, Method::List).await?;
 
-        // Path captures + the persisted annotation schema, resolved once (both are
-        // per-path, identical across pages).
-        let base = route.pattern.match_path(raw_path).unwrap_or_default();
-        let annotations = match &self.schema_source {
-            Some(source) => source.schema(raw_path.to_string()).await?,
-            None => None,
-        };
-
-        // The declared `DataType` of the stream (run the per-request resolver once).
         let schema = match &route.schema_resolver {
-            Some(resolver) => {
-                let mut params = base.clone();
-                params.set_query(query);
-                params.schema = annotations.clone();
-                resolver(state.clone(), params).await?
-            }
+            Some(resolver) => resolver(state.clone(), base.clone()).await?,
             None => route.response_schema.clone(),
         };
 
         let handler = route.handler.clone();
-        let query = query.to_string();
 
-        // Unfold the single-page handler by cursor. State: `Some(None)` = first
-        // page, `Some(Some(token))` = resume, `None` = done.
         let chunks = futures::stream::unfold(Some(None::<String>), move |token_state| {
             let handler = handler.clone();
             let state = state.clone();
             let base = base.clone();
-            let annotations = annotations.clone();
-            let query = query.clone();
             async move {
                 let token = token_state?;
                 let mut params = base.clone();
-                params.set_query(&query);
-                params.schema = annotations.clone();
                 if let Some(token) = &token {
                     params.set_cursor(token);
                 }
@@ -875,37 +825,9 @@ impl<S: Send + Sync + 'static> Router<S> {
         Ok(DataStream { schema, chunks })
     }
 
-    /// Shared matcher: find the first route whose pattern matches `path` and
-    /// whose method satisfies `want`, then invoke it.
-    async fn run(
-        &self,
-        state: Arc<S>,
-        path: &str,
-        body: Option<Body>,
-        want: impl Fn(Method) -> bool,
-        verb: &str,
-    ) -> Result<Response> {
-        let (raw_path, query) = split_query(path);
-        for route in &self.routes {
-            if want(route.method)
-                && let Some(mut params) = route.pattern.match_path(raw_path)
-            {
-                params.set_query(query);
-                if let Some(source) = &self.schema_source {
-                    params.schema = source.schema(raw_path.to_string()).await?;
-                }
-                return (route.handler)(state, params, body).await;
-            }
-        }
-        bail!(
-            "no {verb} route matches `{raw_path}`. known routes:\n  {}",
-            self.patterns().join("\n  ")
-        )
-    }
-
     pub fn validate(&self) -> anyhow::Result<()> {
         for route in &self.routes {
-            if matches!(route.method, Method::List) && route.strategy.is_none() {
+            if matches!(route.method, Method::List) && route.metadata.strategy.is_none() {
                 anyhow::bail!(
                     "list method {:?} does not implement strategy",
                     route.pattern.as_str()
@@ -968,7 +890,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resolve_schema_picks_the_read_route_never_the_write() -> anyhow::Result<()> {
+    async fn resolve_picks_the_read_route_never_the_write() -> anyhow::Result<()> {
         let mut router: Router<()> = Router::new();
         // `put` is registered *first* on `/rows` — resolving must still answer with
         // the `list` row schema, not the write's `WriteMeta`.
@@ -977,26 +899,20 @@ mod tests {
         // A `get`-only path falls back to the entity plane.
         router.add(Route::new().path("/one").get(get_row));
 
-        let rows = router
-            .resolve_schema(Arc::new(()), "/rows")
-            .await
-            .expect("works")?;
-        assert_eq!(rows, Row::schema());
+        let rows = router.resolve(Arc::new(()), "/rows").await?;
+        assert_eq!(rows.response, Row::schema());
+        assert_eq!(rows.method, Method::List);
 
-        let one = router
-            .resolve_schema(Arc::new(()), "/one")
-            .await
-            .expect("works")?;
-        assert_eq!(one, Row::schema());
+        let one = router.resolve(Arc::new(()), "/one").await?;
+        assert_eq!(one.response, Row::schema());
 
         Ok(())
     }
 
     #[tokio::test]
-    async fn resolve_schema_ignores_write_only_paths() {
+    async fn resolve_ignores_write_only_paths() {
         let mut router: Router<()> = Router::new();
         router.add(Route::new().path("/sink").put(put_rows));
-        // No read route: there's no entity to describe.
-        assert!(router.resolve_schema(Arc::new(()), "/sink").await.is_none());
+        assert!(router.resolve(Arc::new(()), "/sink").await.is_err());
     }
 }
