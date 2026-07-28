@@ -41,7 +41,8 @@ impl<S: Provider> Client<S> {
     /// SQL read derives its cursor column from the schema's `cursor` annotation.
     pub fn with_schema(mut self, path: &str, schema: Schema) -> Self {
         self.schemas.insert(path.to_string(), schema);
-        self.router.set_catalog(StaticSchemas(self.schemas.clone()));
+        self.router
+            .set_schema_source(Arc::new(StaticSchemas(self.schemas.clone())));
         self
     }
 

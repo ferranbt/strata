@@ -63,7 +63,7 @@ pub fn derive_has_schema(input: TokenStream) -> TokenStream {
         };
         // TODO: Make this a bit more generic, if we were to have more keys here
         // it would be ugly to extend this return argument.
-        let (is_key, is_cursor, description) = schema_attrs(&field.attrs);
+        let (is_key, is_cursor, description, reference) = schema_attrs(&field.attrs);
         let base = quote! {
             ::schema::Field::new(
                 #field_name,
@@ -73,18 +73,21 @@ pub fn derive_has_schema(input: TokenStream) -> TokenStream {
         };
         // No attributes → the bare constructor; otherwise apply them to a local:
         // `annotate` mutates in place (returns `()`), `with_description` is owned.
-        if !is_key && !is_cursor && description.is_none() {
+        if !is_key && !is_cursor && description.is_none() && reference.is_none() {
             base
         } else {
             let key_call = is_key.then(|| quote! { field.annotate(::schema::Field::KEY, "true"); });
             let cursor_call =
                 is_cursor.then(|| quote! { field.annotate(::schema::Field::CURSOR, "true"); });
+            let ref_call =
+                reference.map(|target| quote! { field.annotate(::schema::Field::REF, #target); });
             let desc_call = description.map(|text| quote! { field = field.with_description(#text); });
             quote! {
                 {
                     let mut field = #base;
                     #key_call
                     #cursor_call
+                    #ref_call
                     #desc_call
                     field
                 }
@@ -113,10 +116,11 @@ pub fn derive_has_schema(input: TokenStream) -> TokenStream {
 /// Read a field's `#[schema(...)]` helper attribute: `(is_key, is_cursor,
 /// description)` from `key`, `cursor`, and `description = "..."` (any combination
 /// may be present).
-fn schema_attrs(attrs: &[syn::Attribute]) -> (bool, bool, Option<String>) {
+fn schema_attrs(attrs: &[syn::Attribute]) -> (bool, bool, Option<String>, Option<String>) {
     let mut is_key = false;
     let mut is_cursor = false;
     let mut description = None;
+    let mut reference = None;
     for attr in attrs {
         if !attr.path().is_ident("schema") {
             continue;
@@ -128,11 +132,13 @@ fn schema_attrs(attrs: &[syn::Attribute]) -> (bool, bool, Option<String>) {
                 is_cursor = true;
             } else if meta.path.is_ident("description") {
                 description = Some(meta.value()?.parse::<syn::LitStr>()?.value());
+            } else if meta.path.is_ident("references") {
+                reference = Some(meta.value()?.parse::<syn::LitStr>()?.value());
             }
             Ok(())
         });
     }
-    (is_key, is_cursor, description)
+    (is_key, is_cursor, description, reference)
 }
 
 /// If `ty` is `Option<Inner>`, return `Inner`.

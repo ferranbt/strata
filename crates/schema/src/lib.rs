@@ -42,6 +42,10 @@ impl Annotations {
     fn has(&self, key: &str) -> bool {
         self.0.contains_key(key)
     }
+
+    fn get(&self, key: &str) -> Option<&str> {
+        self.0.get(key).map(String::as_str)
+    }
 }
 
 impl From<HashMap<String, String>> for Annotations {
@@ -122,6 +126,8 @@ impl Field {
     pub const KEY: &'static str = "key";
     /// Annotation key marking a field as the watermark column for pagination.
     pub const CURSOR: &'static str = "cursor";
+    /// Annotation key: `"target_entity.target_field"` this field references.
+    pub const REF: &'static str = "ref";
 
     pub fn new(name: impl Into<String>, data_type: DataType, nullable: bool) -> Self {
         Field {
@@ -147,6 +153,10 @@ impl Field {
 
     pub fn is_cursor(&self) -> bool {
         self.annotations.has(Self::CURSOR)
+    }
+
+    pub fn ref_target(&self) -> Option<&str> {
+        self.annotations.get(Self::REF)
     }
 
     pub fn with_description(mut self, description: impl Into<String>) -> Self {

@@ -10,6 +10,7 @@
 //! come from the selection set and drive `?fields=` (projection). One page is
 //! served per query (the first chunk).
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -55,9 +56,7 @@ async fn graphiql() -> impl IntoResponse {
 /// Build the dynamic schema: one query field per queryable table across all mounts.
 /// Snapshotted at startup (tables added later need a rebuild).
 async fn build_schema(registry: &Arc<Registry>) -> Result<Schema> {
-    let mut query = Object::new("Query");
-    let mut objects = Vec::new();
-
+    let mut tables_meta = Vec::new();
     for mount in registry.names() {
         for table in tables(registry, &mount).await {
             let path = format!("/tables/{table}");
@@ -68,16 +67,29 @@ async fn build_schema(registry: &Arc<Registry>) -> Result<Schema> {
             if !endpoint.metadata.queryable {
                 continue;
             }
-            let row_schema = endpoint.response;
             let type_name = format!("{mount}_{table}");
-            objects.push(row_object(&type_name, &row_schema));
-            query = query.field(table_field(
-                &type_name,
-                registry.clone(),
-                mount.clone(),
-                table,
-            ));
+            tables_meta.push((mount.clone(), table, type_name, endpoint.response));
         }
+    }
+    let known: HashSet<String> = tables_meta.iter().map(|(_, _, t, _)| t.clone()).collect();
+
+    let mut query = Object::new("Query");
+    let mut objects = Vec::new();
+    for (mount, table, type_name, row_schema) in &tables_meta {
+        objects.push(row_object(
+            type_name,
+            row_schema,
+            registry.clone(),
+            mount.clone(),
+            &known,
+        ));
+        query = query.field(table_field(
+            type_name,
+            registry.clone(),
+            mount.clone(),
+            table.clone(),
+            row_schema,
+        ));
     }
 
     let mut builder = Schema::build("Query", None, None)
@@ -112,7 +124,15 @@ async fn tables(registry: &Arc<Registry>, mount: &str) -> Vec<String> {
 
 /// A GraphQL object type for a row: one field per column, each reading its value
 /// out of the parent JSON row. All fields nullable (providers return nulls freely).
-fn row_object(type_name: &str, row_schema: &StrataSchema) -> Object {
+/// A column with a `ref` annotation also gets a nested field pointing at the
+/// referenced table's type, resolved by a filtered read.
+fn row_object(
+    type_name: &str,
+    row_schema: &StrataSchema,
+    registry: Arc<Registry>,
+    mount: String,
+    known: &HashSet<String>,
+) -> Object {
     let mut object = Object::new(type_name);
     for field in &row_schema.fields {
         let key = field.name.clone();
@@ -132,25 +152,93 @@ fn row_object(type_name: &str, row_schema: &StrataSchema) -> Object {
                 })
             },
         ));
+
+        if let Some((target_table, target_col)) = field.ref_target().and_then(|t| t.split_once('.'))
+            && known.contains(&format!("{mount}_{target_table}"))
+        {
+            object = object.field(nested_field(
+                &field.name,
+                &format!("{mount}_{target_table}"),
+                target_table,
+                target_col,
+                registry.clone(),
+                mount.clone(),
+            ));
+        }
     }
     object
 }
 
+fn nested_field(
+    column: &str,
+    target_type: &str,
+    target_table: &str,
+    target_col: &str,
+    registry: Arc<Registry>,
+    mount: String,
+) -> Field {
+    let name = nested_name(column);
+    let column = column.to_string();
+    let target_table = target_table.to_string();
+    let target_col = target_col.to_string();
+    Field::new(name, TypeRef::named(target_type), move |ctx| {
+        let registry = registry.clone();
+        let mount = mount.clone();
+        let column = column.clone();
+        let target_table = target_table.clone();
+        let target_col = target_col.clone();
+        FieldFuture::new(async move {
+            let row = ctx.parent_value.try_downcast_ref::<Value>()?;
+            let fk = match row.get(&column) {
+                Some(value) if !value.is_null() => value.clone(),
+                _ => return Ok(None),
+            };
+            let filter =
+                serde_json::json!({ "cmp": { "field": target_col, "op": "eq", "value": fk } });
+            let encoded = urlencoding::encode(&filter.to_string()).into_owned();
+            let path = format!("/tables/{target_table}?filter={encoded}&limit=1");
+            let rows = match registry.get(&mount)?.read(&path).await?.first().await? {
+                Some(chunk) => chunk.records.to_json_rows()?,
+                None => Vec::new(),
+            };
+            Ok(rows.into_iter().next().map(FieldValue::owned_any))
+        })
+    })
+}
+
 /// The `Query.<mount>_<table>` field: read one page, honoring `where` and `limit`,
 /// projecting to the selected columns.
-fn table_field(type_name: &str, registry: Arc<Registry>, mount: String, table: String) -> Field {
+fn table_field(
+    type_name: &str,
+    registry: Arc<Registry>,
+    mount: String,
+    table: String,
+    row_schema: &StrataSchema,
+) -> Field {
     let field_name = type_name.to_string();
+    let columns: HashSet<String> = row_schema.fields.iter().map(|f| f.name.clone()).collect();
+    let rel_to_fk: std::collections::HashMap<String, String> = row_schema
+        .fields
+        .iter()
+        .filter(|f| f.ref_target().is_some())
+        .map(|f| (nested_name(&f.name), f.name.clone()))
+        .collect();
     Field::new(field_name, TypeRef::named_nn_list(type_name), move |ctx| {
         let registry = registry.clone();
         let (mount, table) = (mount.clone(), table.clone());
+        let (columns, rel_to_fk) = (columns.clone(), rel_to_fk.clone());
         FieldFuture::new(async move {
-            // `?fields=` from the selection set (skip introspection meta fields).
-            let fields: Vec<String> = ctx
-                .field()
-                .selection_set()
-                .map(|f| f.name().to_string())
-                .filter(|n| !n.starts_with("__"))
-                .collect();
+            let mut fields: Vec<String> = Vec::new();
+            for selected in ctx.field().selection_set() {
+                let name = selected.name();
+                if columns.contains(name) {
+                    fields.push(name.to_string());
+                } else if let Some(fk) = rel_to_fk.get(name)
+                    && !fields.contains(fk)
+                {
+                    fields.push(fk.clone());
+                }
+            }
 
             let filter = ctx
                 .args
@@ -172,6 +260,13 @@ fn table_field(type_name: &str, registry: Arc<Registry>, mount: String, table: S
     })
     .argument(InputValue::new("where", TypeRef::named(JSON)))
     .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)))
+}
+
+fn nested_name(column: &str) -> String {
+    column
+        .strip_suffix("_id")
+        .filter(|s| !s.is_empty())
+        .map_or_else(|| format!("{column}_ref"), String::from)
 }
 
 /// `/tables/<table>` with `filter`/`fields`/`limit` query params set.
@@ -216,7 +311,7 @@ mod tests {
     use crate::pipe::{run_pass, store::NoPipeStore};
     use crate::providers::dummy::Dummy;
     use crate::providers::sqlite::Sqlite;
-    use schema::{DataType, SchemaBuilder};
+    use schema::{DataType, HasSchema, SchemaBuilder};
     use serde_json::json;
     use strata_types::{Endpoint, Pipe};
 
@@ -281,6 +376,99 @@ mod tests {
             (1..25).contains(&matched),
             "filter should narrow the set, got {matched}"
         );
+
+        let _ = std::fs::remove_file(&db_path);
+        Ok(())
+    }
+
+    struct StaticSource(std::collections::HashMap<String, StrataSchema>);
+
+    impl crate::router::SchemaSource for StaticSource {
+        fn schema(
+            &self,
+            path: String,
+        ) -> crate::router::BoxFuture<'static, Result<Option<StrataSchema>>> {
+            let found = self.0.get(&path).cloned();
+            Box::pin(async move { Ok(found) })
+        }
+    }
+
+    async fn put<T: serde::Serialize + schema::HasSchema>(
+        registry: &Registry,
+        path: &str,
+        rows: &[T],
+    ) -> Result<()> {
+        let body = crate::Body {
+            data: Some(crate::Dataset::of(rows)?.into_stream()),
+            meta: Value::Null,
+        };
+        registry
+            .get("local")?
+            .invoke(crate::Method::Put, path, Some(body))
+            .await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn resolves_a_declared_relationship() -> Result<()> {
+        #[derive(serde::Serialize, schema::HasSchema)]
+        struct Customer {
+            #[schema(key)]
+            id: i64,
+            name: String,
+        }
+        #[derive(serde::Serialize, schema::HasSchema)]
+        struct Order {
+            #[schema(key)]
+            id: i64,
+            customer_id: i64,
+        }
+        #[derive(serde::Serialize, schema::HasSchema)]
+        struct OrderRel {
+            #[schema(key)]
+            id: i64,
+            #[schema(references = "customers.id")]
+            customer_id: i64,
+        }
+
+        let db_path = std::env::temp_dir().join("strata_graphql_rel.sqlite");
+        let _ = std::fs::remove_file(&db_path);
+
+        let mut registry = Registry::new();
+        let cfg: ProviderConfig = serde_json::from_value(
+            json!({ "backend": "sqlite", "path": db_path.to_str().unwrap() }),
+        )?;
+        registry.mount::<Sqlite>("local", &cfg)?;
+
+        put(
+            &registry,
+            "/tables/customers",
+            &[Customer { id: 1, name: "acme".into() }],
+        )
+        .await?;
+        put(
+            &registry,
+            "/tables/orders",
+            &[Order { id: 10, customer_id: 1 }],
+        )
+        .await?;
+
+        let mut declared = std::collections::HashMap::new();
+        declared.insert("/tables/orders".to_string(), OrderRel::schema());
+        registry.set_schema_source("local", Arc::new(StaticSource(declared)))?;
+
+        let registry = Arc::new(registry);
+        let schema = build_schema(&registry).await?;
+
+        let response = schema
+            .execute("{ local_orders { id customer { id name } } }")
+            .await;
+        assert!(response.errors.is_empty(), "graphql errors: {:?}", response.errors);
+        let data = response.data.into_json().unwrap();
+        let order = &data["local_orders"][0];
+        assert_eq!(order["id"], 10);
+        assert_eq!(order["customer"]["id"], 1);
+        assert_eq!(order["customer"]["name"], "acme");
 
         let _ = std::fs::remove_file(&db_path);
         Ok(())

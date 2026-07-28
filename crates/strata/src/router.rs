@@ -74,6 +74,10 @@ impl Params {
         self.query.get(key).map(String::as_str)
     }
 
+    pub fn schema(&self) -> Option<&Schema> {
+        self.schema.as_ref()
+    }
+
     /// The resume cursor, decoded into the provider's own cursor state `C` — the
     /// inverse of [`Cursor::new`]. On the first page (no `cursor` param) it decodes
     /// `{}`, so `C`'s `#[serde(default)]` fields supply the starting position.
@@ -703,7 +707,7 @@ impl Serialize for EndpointInfo {
 /// Maps route patterns to handlers for one provider whose state is `S`.
 pub struct Router<S> {
     routes: Vec<Entry<S>>,
-    schema_source: Option<Box<dyn SchemaSource>>,
+    schema_source: Option<Arc<dyn SchemaSource>>,
 }
 
 impl<S> Default for Router<S> {
@@ -722,8 +726,8 @@ impl<S: Send + Sync + 'static> Router<S> {
 
     /// Wire the schema source (called by `serve` once the catalog DB is up), so
     /// dispatch can hand each handler the persisted schema for its endpoint.
-    pub fn set_catalog(&mut self, source: impl SchemaSource + 'static) {
-        self.schema_source = Some(Box::new(source));
+    pub fn set_schema_source(&mut self, source: Arc<dyn SchemaSource>) {
+        self.schema_source = Some(source);
     }
 
     /// Register a built [`Route`]. Panics at startup if the route has no
