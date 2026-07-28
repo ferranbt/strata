@@ -55,12 +55,12 @@ impl StrataFlight {
             .get(provider)
             .map_err(|e| Status::not_found(e.to_string()))?;
 
-        let schema = provider
-            .resolve_schema(path)
+        let endpoint = provider
+            .resolve(path)
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
 
-        Ok(strata_schema_to_arrow_schema(&schema))
+        Ok(strata_schema_to_arrow_schema(&endpoint.response))
     }
 }
 
@@ -164,10 +164,10 @@ impl FlightService for StrataFlight {
                 .map_err(|e| Status::internal(e.to_string()))?;
             // Advertise the static schema per endpoint; endpoints whose schema
             // is dynamic or not record-shaped (e.g. a generic `Row`) are skipped.
-            for (path, schema) in provider.endpoint_schemas() {
-                let arrow_schema = strata_schema_to_arrow_schema(&schema);
+            for endpoint in provider.endpoints() {
+                let arrow_schema = strata_schema_to_arrow_schema(&endpoint.response);
 
-                let descriptor = FlightDescriptor::new_path(vec![name.clone(), path]);
+                let descriptor = FlightDescriptor::new_path(vec![name.clone(), endpoint.path]);
                 if let Ok(info) = FlightInfo::new().try_with_schema(&arrow_schema) {
                     infos.push(Ok(info.with_descriptor(descriptor)));
                 }

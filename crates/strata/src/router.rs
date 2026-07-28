@@ -315,6 +315,20 @@ struct Entry<S> {
     queryable: bool,
 }
 
+impl<S> Entry<S> {
+    /// Static description of this route (dynamic resolver not run).
+    fn info(&self) -> EndpointInfo {
+        EndpointInfo {
+            method: self.method,
+            path: self.pattern.as_str().to_string(),
+            description: self.description.clone(),
+            params: self.pattern.param_names(),
+            body: self.body_schema.clone(),
+            response: self.response_schema.clone(),
+        }
+    }
+}
+
 /// Erase a `get` handler `(Arc<S>, Params) -> T`: an entity-plane read. The result
 /// is one JSON resource in [`Response::entity`] — off the Arrow stream channel, so
 /// `T` need only be `Serialize` (it can be non-tabular). Takes no request body.
@@ -645,22 +659,43 @@ impl<S: Send + Sync + 'static> Route<S> {
     }
 }
 
-/// A machine-readable description of one endpoint, for introspection.
-#[derive(Debug, Serialize)]
+/// A machine-readable description of one endpoint. Schemas are the native
+/// [`Schema`]; `Serialize` renders them as JSON Schema for the `strata schema`
+/// output. `response` is the static schema in [`Router::endpoints`] and the
+/// dynamically-resolved one from [`Router::resolve`].
+#[derive(Debug, Clone)]
 pub struct EndpointInfo {
-    /// The verb this endpoint answers: `get`, `list`, `create`, or `upsert`.
     pub method: Method,
     /// The route pattern, e.g. `/repos/:owner/:name`.
     pub path: String,
-    /// Human-readable description of the endpoint, if declared. Omitted when unset.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     /// Names of the path captures the endpoint takes.
     pub params: Vec<String>,
-    /// JSON Schema of the request body, for write verbs. `null` for reads.
-    pub body: Value,
-    /// JSON Schema of the value this endpoint returns.
-    pub response: Value,
+    /// Request-body schema (empty for reads).
+    pub body: Schema,
+    /// Response schema.
+    pub response: Schema,
+}
+
+impl Serialize for EndpointInfo {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(None)?;
+        map.serialize_entry("method", &self.method)?;
+        map.serialize_entry("path", &self.path)?;
+        if let Some(description) = &self.description {
+            map.serialize_entry("description", description)?;
+        }
+        map.serialize_entry("params", &self.params)?;
+        let body = if self.method.is_write() {
+            self.body.to_json_schema()
+        } else {
+            Value::Null
+        };
+        map.serialize_entry("body", &body)?;
+        map.serialize_entry("response", &self.response.to_json_schema())?;
+        map.end()
+    }
 }
 
 /// Maps route patterns to handlers for one provider whose state is `S`.
@@ -703,38 +738,16 @@ impl<S: Send + Sync + 'static> Router<S> {
             .collect()
     }
 
-    /// Describe every endpoint (path, params, response schema) for introspection.
+    /// Describe every endpoint (static schemas; dynamic resolvers not run) for
+    /// introspection, the CLI listing, and Flight `ListFlights`.
     pub fn endpoints(&self) -> Vec<EndpointInfo> {
-        self.routes
-            .iter()
-            .map(|r| EndpointInfo {
-                method: r.method,
-                path: r.pattern.as_str().to_string(),
-                description: r.description.clone(),
-                params: r.pattern.param_names(),
-                body: if r.method.is_write() {
-                    r.body_schema.to_json_schema()
-                } else {
-                    Value::Null
-                },
-                response: r.response_schema.to_json_schema(),
-            })
-            .collect()
+        self.routes.iter().map(Entry::info).collect()
     }
 
-    /// Static response `DataType` of every route, paired with its pattern (for
-    /// Flight `ListFlights`). Ignores dynamic resolvers.
-    pub fn schemas(&self) -> Vec<(String, Schema)> {
-        self.routes
-            .iter()
-            .map(|r| (r.pattern.as_str().to_string(), r.response_schema.clone()))
-            .collect()
-    }
-
-    /// The `DataType` of the *entity* at `path`. Resolves a **read** route only:
-    /// the data plane (`List` — exactly what [`dispatch_read`](Self::dispatch_read)
-    /// streams) if there is one, else the entity plane (`Get`)
-    pub async fn resolve_schema(&self, state: Arc<S>, path: &str) -> Option<Result<Schema>> {
+    /// The **read** endpoint matching a concrete `path` (`List` preferred, else
+    /// `Get`), with its response schema resolved — running the dynamic resolver when
+    /// the route has one. `None` if no read route matches.
+    pub async fn resolve(&self, state: Arc<S>, path: &str) -> Option<Result<EndpointInfo>> {
         let (raw_path, _) = split_query(path);
         let read = |method: Method| {
             self.routes
@@ -742,13 +755,15 @@ impl<S: Send + Sync + 'static> Router<S> {
                 .find(move |r| r.method == method && r.pattern.match_path(raw_path).is_some())
         };
         let route = read(Method::List).or_else(|| read(Method::Get))?;
-        match &route.schema_resolver {
-            Some(resolver) => {
-                let params = route.pattern.match_path(raw_path).unwrap_or_default();
-                Some(resolver(state, params).await)
-            }
-            None => Some(Ok(route.response_schema.clone())),
+        let mut info = route.info();
+        if let Some(resolver) = &route.schema_resolver {
+            let params = route.pattern.match_path(raw_path).unwrap_or_default();
+            info.response = match resolver(state, params).await {
+                Ok(schema) => schema,
+                Err(e) => return Some(Err(e)),
+            };
         }
+        Some(Ok(info))
     }
 
     /// The declared [`ListStrategy`] of the `list` route matching `path`, or `None`
@@ -968,7 +983,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resolve_schema_picks_the_read_route_never_the_write() -> anyhow::Result<()> {
+    async fn resolve_picks_the_read_route_never_the_write() -> anyhow::Result<()> {
         let mut router: Router<()> = Router::new();
         // `put` is registered *first* on `/rows` — resolving must still answer with
         // the `list` row schema, not the write's `WriteMeta`.
@@ -977,26 +992,21 @@ mod tests {
         // A `get`-only path falls back to the entity plane.
         router.add(Route::new().path("/one").get(get_row));
 
-        let rows = router
-            .resolve_schema(Arc::new(()), "/rows")
-            .await
-            .expect("works")?;
-        assert_eq!(rows, Row::schema());
+        let rows = router.resolve(Arc::new(()), "/rows").await.expect("works")?;
+        assert_eq!(rows.response, Row::schema());
+        assert_eq!(rows.method, Method::List);
 
-        let one = router
-            .resolve_schema(Arc::new(()), "/one")
-            .await
-            .expect("works")?;
-        assert_eq!(one, Row::schema());
+        let one = router.resolve(Arc::new(()), "/one").await.expect("works")?;
+        assert_eq!(one.response, Row::schema());
 
         Ok(())
     }
 
     #[tokio::test]
-    async fn resolve_schema_ignores_write_only_paths() {
+    async fn resolve_ignores_write_only_paths() {
         let mut router: Router<()> = Router::new();
         router.add(Route::new().path("/sink").put(put_rows));
         // No read route: there's no entity to describe.
-        assert!(router.resolve_schema(Arc::new(()), "/sink").await.is_none());
+        assert!(router.resolve(Arc::new(()), "/sink").await.is_none());
     }
 }

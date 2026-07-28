@@ -9,7 +9,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow, bail};
-use schema::Schema;
 use serde_json::{Value, json};
 
 use crate::catalog::Catalog;
@@ -41,15 +40,11 @@ pub trait ProviderObject: Send + Sync {
     /// Wire the mount-scoped [`Catalog`] into this provider's router, so its
     /// handlers can read their own persisted annotations.
     fn set_catalog(&mut self, catalog: Catalog);
-    fn routes(&self) -> Vec<String>;
-    /// Machine-readable description of every endpoint (path, params, response
-    /// schema), for introspection.
+    /// Every endpoint, statically described (dynamic resolvers not run).
     fn endpoints(&self) -> Vec<EndpointInfo>;
-    /// Static response `DataType` of every endpoint, paired with its pattern.
-    fn endpoint_schemas(&self) -> Vec<(String, Schema)>;
-    /// Response `DataType` of the endpoint matching `path`, resolved (running a
-    /// dynamic schema resolver if the endpoint has one).
-    fn resolve_schema<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<Schema>>;
+    /// The read endpoint matching a concrete `path`, with its response schema
+    /// resolved (running a dynamic resolver if the route has one).
+    fn resolve<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<EndpointInfo>>;
     /// The declared [`ListStrategy`] of the `list` route matching `path`, for the
     /// external sync layer to drive its walk. `None` if no list route matches.
     fn strategy(&self, path: &str) -> Option<ListStrategy>;
@@ -92,24 +87,16 @@ where
         self.router.set_catalog(catalog);
     }
 
-    fn routes(&self) -> Vec<String> {
-        self.router.patterns()
-    }
-
     fn endpoints(&self) -> Vec<EndpointInfo> {
         self.router.endpoints()
     }
 
-    fn endpoint_schemas(&self) -> Vec<(String, Schema)> {
-        self.router.schemas()
-    }
-
-    fn resolve_schema<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<Schema>> {
+    fn resolve<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<EndpointInfo>> {
         let state = self.state.clone();
         let path = path.to_string();
         Box::pin(async move {
             self.router
-                .resolve_schema(state, &path)
+                .resolve(state, &path)
                 .await
                 .ok_or_else(|| anyhow!("no endpoint matches `{path}`"))?
         })
