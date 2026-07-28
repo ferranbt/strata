@@ -383,9 +383,7 @@ fn autodetect_cursor(schema: &Schema) -> Option<String> {
     by_name("created_at").or_else(|| by_name("updated_at"))
 }
 
-/// The `.data_type()` resolver for `/tables/:table/data`. Honors the same `?fields=`
-/// projection as [`table_data`], so the schema the router declares for the stream
-/// matches the columns actually served (the result schema, not the full dataset).
+/// The `.data_type()` resolver for `/tables/:table/data`.
 pub async fn table_data_schema<S: SqlSource>(db: Arc<S>, p: Params) -> Result<Schema> {
     let full = db.table_schema(p.get("table")?).await?;
     project_schema(&full, get_projection(&p).as_deref())
