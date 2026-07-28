@@ -370,6 +370,7 @@ mod tests {
         sql::suite::lists_tables_and_schema(&client).await?;
         sql::suite::write_then_read_paginates_by_cursor(&client).await?;
         sql::suite::filters_rows(&client).await?;
+        sql::suite::projects_columns(&client).await?;
         let _ = std::fs::remove_file(&path);
         Ok(())
     }
