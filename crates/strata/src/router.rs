@@ -738,8 +738,7 @@ impl<S: Send + Sync + 'static> Router<S> {
         self.routes.push(route.into_entry());
     }
 
-    /// All registered patterns, in registration order (for `strata list`).
-    pub fn patterns(&self) -> Vec<String> {
+    fn patterns(&self) -> Vec<String> {
         self.routes
             .iter()
             .map(|r| r.pattern.as_str().to_string())
@@ -970,7 +969,10 @@ mod tests {
         // A `get`-only path falls back to the entity plane.
         router.add(Route::new().path("/one").get(get_row));
 
-        let rows = router.resolve(Arc::new(()), "/rows").await.expect("works")?;
+        let rows = router
+            .resolve(Arc::new(()), "/rows")
+            .await
+            .expect("works")?;
         assert_eq!(rows.response, Row::schema());
         assert_eq!(rows.method, Method::List);
 
