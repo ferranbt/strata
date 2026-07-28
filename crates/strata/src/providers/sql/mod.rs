@@ -110,6 +110,58 @@ const MAX_LIMIT: u32 = 1000;
 /// Reserved read param carrying a JSON-encoded [`Filter`], decoded like the cursor.
 const FILTER_PARAM: &str = "filter";
 
+/// Reserved read param selecting a subset of columns: a comma-separated list of
+/// field names (`?fields=id,name`). Absent means the whole row.
+const FIELDS_PARAM: &str = "fields";
+
+/// The requested column projection from `?fields=`, or `None` for the whole row.
+/// Blank entries are dropped; an all-blank list is treated as absent.
+fn projection(p: &Params) -> Option<Vec<String>> {
+    let cols: Vec<String> = p
+        .query(FIELDS_PARAM)?
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .collect();
+    (!cols.is_empty()).then_some(cols)
+}
+
+/// Narrow `schema` to the projected columns, preserving the schema's field order
+/// and erroring on an unknown column. Returns the full schema when nothing is
+/// projected. The full dataset schema stays the contract; this is the *result*
+/// schema of one projected read, which is always a subset of it.
+fn project_schema(schema: &Schema, projection: Option<&[String]>) -> Result<Schema> {
+    let Some(cols) = projection else {
+        return Ok(schema.clone());
+    };
+    for col in cols {
+        if !schema.fields.iter().any(|f| &f.name == col) {
+            bail!("unknown projected column `{col}`");
+        }
+    }
+    let fields = schema
+        .fields
+        .iter()
+        .filter(|f| cols.contains(&f.name))
+        .cloned()
+        .collect();
+    Ok(Schema::new(fields))
+}
+
+/// Drop every key not in the projected `schema` from each row, so the JSON rows
+/// match the narrowed schema before Arrow encoding. Runs after the DB fetch, so a
+/// filter or cursor column that was projected away is still available upstream.
+fn project_rows(schema: &Schema, rows: &mut [Value]) {
+    let keep: std::collections::HashSet<&str> =
+        schema.fields.iter().map(|f| f.name.as_str()).collect();
+    for row in rows.iter_mut() {
+        if let Value::Object(map) = row {
+            map.retain(|k, _| keep.contains(k.as_str()));
+        }
+    }
+}
+
 /// The page cursor for `/tables/:table/data`.
 /// When `cursor` (a column name) is set the provider orders by it
 /// (`ORDER BY cursor ASC`) so paging is deterministic.
@@ -237,19 +289,28 @@ pub async fn list_tables<S: SqlSource>(db: Arc<S>, _p: Params) -> Result<Page<Ta
 /// columns, offset-paginated.
 pub async fn table_data<S: SqlSource>(db: Arc<S>, p: Params) -> Result<RecordPage> {
     let name = p.get("table")?;
-    let schema = db.table_schema(name).await?;
+    // The full table schema drives the fetch (cursor column, filter columns); the
+    // projected schema governs what's returned. The cursor is resolved off the full
+    // schema so ordering works even when the cursor column is projected away.
+    // TODO: Select the table fields at the provider level itself.
+    let full = db.table_schema(name).await?;
+    let projection = projection(&p);
+    let schema = project_schema(&full, projection.as_deref())?;
 
     // Hydrate the request-time fields: page size and the resolved cursor column.
     let mut cursor: SqlCursor = p.cursor()?;
     cursor.limit = p.limit(DEFAULT_LIMIT, MAX_LIMIT);
-    cursor.cursor = resolve_cursor(&p, &schema);
+    cursor.cursor = resolve_cursor(&p, &full);
 
     let filter = p.query(FILTER_PARAM).map(parse_filter).transpose()?;
 
     let mut rows = db.table_rows(name, &cursor, filter.as_ref()).await?;
+    let next = next_cursor(&cursor, rows.len())?;
+    if projection.is_some() {
+        project_rows(&schema, &mut rows);
+    }
     stringify_text_columns(&schema, &mut rows);
     normalize_temporals(&schema, &mut rows);
-    let next = next_cursor(&cursor, rows.len())?;
     let data = Records::encode(schema.clone(), &rows)?;
     Ok(RecordPage { data, cursor: next })
 }
@@ -325,9 +386,12 @@ fn autodetect_cursor(schema: &Schema) -> Option<String> {
     by_name("created_at").or_else(|| by_name("updated_at"))
 }
 
-/// The `.data_type()` resolver for `/tables/:table/data`.
+/// The `.data_type()` resolver for `/tables/:table/data`. Honors the same `?fields=`
+/// projection as [`table_data`], so the schema the router declares for the stream
+/// matches the columns actually served (the result schema, not the full dataset).
 pub async fn table_data_schema<S: SqlSource>(db: Arc<S>, p: Params) -> Result<Schema> {
-    db.table_schema(p.get("table")?).await
+    let full = db.table_schema(p.get("table")?).await?;
+    project_schema(&full, projection(&p).as_deref())
 }
 
 /// `put /tables/:table`: sink a [`DataStream`]. Decodes the `disposition` param and
@@ -392,6 +456,12 @@ pub mod suite {
         id: i64,
         #[schema(cursor)]
         created_at: schema::Timestamp,
+        name: String,
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct RowProjected {
         name: String,
     }
 
@@ -497,9 +567,7 @@ pub mod suite {
         Ok(())
     }
 
-    /// A `?filter=` predicate restricts the rows a `list` returns, compiled to a SQL
-    /// `WHERE`. Exercises an AND of a range with a nested OR of equalities against
-    /// the real dialect: `id >= 2 AND (name = 'b' OR name = 'd')`.
+    /// A `?filter=` predicate restricts the rows a `list` returns.
     pub async fn filters_rows<S: Provider>(client: &Client<S>) -> Result<()> {
         let rows = [
             Row {
@@ -546,6 +614,45 @@ pub mod suite {
             ["b", "d"],
             "filter must return only rows matching `id >= 2 AND (name = b OR name = d)`"
         );
+        Ok(())
+    }
+
+    /// A `?fields=` projection returns only the named columns
+    pub async fn projects_columns<S: Provider>(client: &Client<S>) -> Result<()> {
+        let rows = [
+            Row {
+                id: 1,
+                name: "a".into(),
+            },
+            Row {
+                id: 2,
+                name: "b".into(),
+            },
+        ];
+        let _: WriteResult = client.put("/tables/projected", Dataset::of(&rows)?).await?;
+
+        let mut stream = client
+            .list::<RowProjected>("/tables/projected?fields=name")
+            .await?;
+
+        let declared: Vec<&str> = stream
+            .schema()
+            .fields
+            .iter()
+            .map(|f| f.name.as_str())
+            .collect();
+        assert_eq!(
+            declared,
+            ["name"],
+            "projected read must declare only the requested column"
+        );
+
+        let projected = stream.next().await?;
+        let names: Vec<&str> = projected.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(names, ["a", "b"], "projected rows must carry only `name`");
+
+        let mut full = client.list::<Row>("/tables/projected").await?;
+        assert_eq!(full.next().await?.len(), 2);
         Ok(())
     }
 }
