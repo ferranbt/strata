@@ -24,9 +24,10 @@ use anyhow::Result;
 
 pub use catalog::Catalog;
 pub use config::{Config, ProviderConfig};
-pub use dataset::{Chunk, DataStream, Dataset, Disposition};
+pub use dataset::{Dataset, Disposition};
 pub use page::{Cursor, Page};
 pub use provider::{Provider, ProviderObject, Registry};
+pub use record::DataStream;
 pub use router::{Body, EndpointInfo, Method, Params, Response, Router};
 
 /// Config file consulted by [`registry`] when no explicit path is given.

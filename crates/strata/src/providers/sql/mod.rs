@@ -25,7 +25,7 @@ use serde_json::Value;
 use crate::dataset::{DataStream, Dataset, Disposition};
 use crate::page::{Cursor, ListStrategy, Page};
 use crate::provider::Provider;
-use crate::record::{RecordPage, Records, stringify_text_columns};
+use crate::record::{RecordPage, Records, strata_schema_to_arrow_schema, stringify_text_columns};
 use crate::router::{Params, Route, Router};
 
 mod filter;
@@ -234,9 +234,17 @@ pub trait SqlSource: Send + Sync + 'static {
                 Some(current) if current == &schema => false,
                 _ => self.upsert_table(table, &schema).await?,
             };
+            let arrow_schema = Arc::new(strata_schema_to_arrow_schema(&schema));
             let mut rows_written = 0;
             while let Some(chunk) = chunks.next().await {
-                let dataset = Dataset::new(schema.clone(), chunk?.records);
+                // TODO: We still create a dataset object, later on we should send
+                // the stream directly to the SQL provider but we would need a way for the provider
+                // to notify which batch has been written.
+                let records = Records {
+                    schema: arrow_schema.clone(),
+                    batches: chunk?.batches,
+                };
+                let dataset = Dataset::new(schema.clone(), records);
                 rows_written += self
                     .write_table(table, dataset, disposition)
                     .await?

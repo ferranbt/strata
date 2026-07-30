@@ -7,13 +7,17 @@
 //! over Arrow Flight the same `(schema, rows)` rides natively in a `DoPut`.
 
 use anyhow::{Result, bail};
+use arrow_array::RecordBatch;
 use futures::stream::{BoxStream, StreamExt};
 use schema::Schema;
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::page::Cursor;
-use crate::record::Records;
+use crate::{
+    DataStream,
+    page::Cursor,
+    record::{Batch, BatchPage},
+};
 
 /// How a sink should apply a written dataset. Rides as metadata on the existing
 /// `put` verb (the reserved `disposition` query param) rather than a new verb, so
@@ -66,11 +70,11 @@ impl Disposition {
 #[derive(Debug, Clone)]
 pub struct Dataset {
     pub schema: Schema,
-    pub records: Records,
+    pub records: Batch,
 }
 
 impl Dataset {
-    pub fn new(schema: Schema, records: Records) -> Self {
+    pub fn new(schema: Schema, records: Batch) -> Self {
         Dataset { schema, records }
     }
 
@@ -79,7 +83,7 @@ impl Dataset {
     /// against it. The typed-input counterpart of a `put`.
     pub fn of<T: serde::Serialize + schema::HasSchema>(rows: &[T]) -> Result<Self> {
         let schema = T::schema();
-        let records = Records::encode(schema.clone(), rows)?;
+        let records = Batch::encode(schema.clone(), rows)?;
         Ok(Dataset::new(schema, records))
     }
 
@@ -87,72 +91,18 @@ impl Dataset {
     /// Arrow-native. This is the one labeled Arrow→JSON on the write path; Phase B
     /// removes it as each sink binds Arrow columns directly.
     pub fn to_json_rows(&self) -> Result<Vec<Value>> {
-        self.records.to_json_rows()
+        self.records.to_json_rows(&self.schema)
     }
 
     /// Bridge to a single-chunk [`DataStream`], until readers produce batches lazily.
     pub fn into_stream(self) -> DataStream {
-        let chunk = Chunk {
-            records: self.records,
+        let chunk = BatchPage {
+            data: self.records,
             cursor: None,
         };
         DataStream {
             schema: self.schema,
             chunks: futures::stream::once(async move { Ok(chunk) }).boxed(),
         }
-    }
-}
-
-/// One batch of a data-plane stream, with an optional resume [`Cursor`] valid
-/// after it (sparse — `Some` only at checkpoint boundaries). Over Flight it maps
-/// to a `FlightData`'s `app_metadata`.
-pub struct Chunk {
-    pub records: Records,
-    pub cursor: Option<Cursor>,
-}
-
-impl Chunk {
-    /// Decode this batch's rows into typed values.
-    pub fn decode<T: serde::de::DeserializeOwned>(&self) -> Result<Vec<T>> {
-        self.records.decode()
-    }
-}
-
-/// The streaming form of a [`Dataset`]: the native `schema` plus a lazy stream of
-/// [`Chunk`]s following it, consumed by a sink without materializing the table.
-pub struct DataStream {
-    pub schema: Schema,
-    pub chunks: BoxStream<'static, Result<Chunk>>,
-}
-
-impl DataStream {
-    /// Pull just the first [`Chunk`] (one page) — the `list_once` case for callers
-    /// that want a bounded read instead of draining. The schema rides alongside.
-    pub async fn first(mut self) -> Result<Option<Chunk>> {
-        self.chunks.next().await.transpose()
-    }
-
-    /// Drain every chunk into one materialized [`Dataset`] — the bridge for sinks
-    /// that don't consume the stream incrementally.
-    pub async fn collect(self) -> Result<Dataset> {
-        let DataStream { schema, mut chunks } = self;
-        let mut batches = Vec::new();
-        let mut arrow_schema = None;
-        while let Some(chunk) = chunks.next().await {
-            let records = chunk?.records;
-            arrow_schema.get_or_insert_with(|| records.schema.clone());
-            batches.extend(records.batches);
-        }
-        let arrow_schema = match arrow_schema {
-            Some(s) => s,
-            None => std::sync::Arc::new(crate::record::strata_schema_to_arrow_schema(&schema)),
-        };
-        Ok(Dataset::new(
-            schema,
-            Records {
-                schema: arrow_schema,
-                batches,
-            },
-        ))
     }
 }

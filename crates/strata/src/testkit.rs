@@ -14,8 +14,9 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use crate::dataset::{DataStream, Dataset};
+use crate::dataset::Dataset;
 use crate::provider::Provider;
+use crate::record::DataStream;
 use crate::router::{Body, BoxFuture, Method, Response, Router, SchemaSource};
 
 pub struct Client<S> {
@@ -109,14 +110,12 @@ impl<T: DeserializeOwned> ListConsumer<T> {
     }
 
     pub async fn next(&mut self) -> anyhow::Result<Vec<T>> {
-        let data: Vec<T> = self
-            .data_stream
+        self.data_stream
             .chunks
             .next()
             .await
             .expect("returned no page")?
-            .decode()?;
-
-        Ok(data)
+            .data
+            .decode::<T>(self.schema())
     }
 }

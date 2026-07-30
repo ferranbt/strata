@@ -12,7 +12,7 @@ use schema::{DataType, Field, Schema};
 use serde_json::{Map, Value, json};
 
 use crate::dataset::Dataset;
-use crate::record::{Records, stringify_text_columns};
+use crate::record::{Batch, stringify_text_columns};
 
 pub struct Generator {
     schema: Schema,
@@ -42,10 +42,10 @@ impl Generator {
     }
 
     /// The rows in `range`, Arrow-encoded — one page.
-    pub fn rows(&self, range: Range<usize>) -> Result<Records> {
+    pub fn rows(&self, range: Range<usize>) -> Result<Batch> {
         let mut rows: Vec<Value> = range.map(|i| self.row(i)).collect();
         stringify_text_columns(&self.schema, &mut rows);
-        Records::encode(self.schema.clone(), &rows)
+        Batch::encode(self.schema.clone(), &rows)
     }
 
     /// The first `n` rows as a [`Dataset`] (schema + Arrow records).

@@ -299,10 +299,13 @@ async fn put_table(ice: Arc<Iceberg>, p: Params, stream: DataStream) -> Result<W
     if Disposition::from_param(p.query(Disposition::PARAM))? == Disposition::Merge {
         bail!("iceberg sink supports only `append` (merge is not yet implemented)");
     }
-    // Iceberg isn't streaming yet: drain the stream into one dataset, then commit.
-    let data = stream.collect().await?;
-    let fields = data.schema.fields.clone();
-    if fields.is_empty() {
+    // The stream's schema is the sink contract; its batches are written as they
+    // arrive and committed together as one snapshot.
+    let DataStream {
+        schema,
+        mut chunks,
+    } = stream;
+    if schema.fields.is_empty() {
         bail!("dataset schema has no columns");
     }
 
@@ -317,7 +320,7 @@ async fn put_table(ice: Arc<Iceberg>, p: Params, stream: DataStream) -> Result<W
     let table = if created {
         let creation = TableCreation::builder()
             .name(name.to_string())
-            .schema(strata_to_iceberg_schema(data.schema)?)
+            .schema(strata_to_iceberg_schema(&schema)?)
             .build();
         catalog.create_table(&ns, creation).await?
     } else {
@@ -353,15 +356,17 @@ async fn put_table(ice: Arc<Iceberg>, p: Params, stream: DataStream) -> Result<W
         file_name_gen,
     );
     let mut writer = DataFileWriterBuilder::new(rolling).build(None).await?;
-    // Write the dataset's Arrow batches straight through — no JSON round-trip.
+    // Write the stream's Arrow batches straight through — no JSON round-trip.
     let mut rows_written = 0u64;
-    for batch in &data.records.batches {
-        if batch.num_rows() == 0 {
-            continue;
+    while let Some(chunk) = chunks.try_next().await? {
+        for batch in &chunk.batches {
+            if batch.num_rows() == 0 {
+                continue;
+            }
+            let aligned = align_to(&arrow_schema, batch)?;
+            rows_written += aligned.num_rows() as u64;
+            writer.write(aligned).await?;
         }
-        let aligned = align_to(&arrow_schema, batch)?;
-        rows_written += aligned.num_rows() as u64;
-        writer.write(aligned).await?;
     }
     let data_files = writer.close().await?;
 

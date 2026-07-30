@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 
 use crate::catalog::Catalog;
 use crate::config::ProviderConfig;
-use crate::dataset::DataStream;
+use crate::record::DataStream;
 use crate::router::{Body, BoxFuture, EndpointInfo, Method, Response, Router, SchemaSource};
 
 /// Implemented by each concrete provider. Knows its state type and how to wire
