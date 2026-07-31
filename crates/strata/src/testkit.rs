@@ -104,13 +104,22 @@ pub struct ListConsumer<T> {
 }
 
 impl<T: DeserializeOwned> ListConsumer<T> {
-    /// The endpoint's resolved schema, as the router declared it for this stream.
     pub fn schema(&self) -> &Schema {
         &self.data_stream.schema
     }
 
+    pub async fn consume_all(&mut self) -> anyhow::Result<Vec<T>> {
+        let mut got = Vec::new();
+        while let Some(page) = self.try_next().await? {
+            got.extend(page);
+        }
+        Ok(got)
+    }
+
     pub async fn next(&mut self) -> anyhow::Result<Vec<T>> {
-        self.try_next().await?.ok_or_else(|| anyhow!("returned no page"))
+        self.try_next()
+            .await?
+            .ok_or_else(|| anyhow!("returned no page"))
     }
 
     pub async fn try_next(&mut self) -> anyhow::Result<Option<Vec<T>>> {
