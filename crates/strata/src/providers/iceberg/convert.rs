@@ -11,7 +11,7 @@ use iceberg::spec::{
 };
 use schema::{DataType, Schema};
 
-pub(super) fn strata_to_iceberg_schema(schema: Schema) -> Result<IcebergSchema> {
+pub(super) fn strata_to_iceberg_schema(schema: &Schema) -> Result<IcebergSchema> {
     let mut next_id = 0;
     let nested = struct_fields(&schema.fields, &mut next_id);
     Ok(IcebergSchema::builder().with_fields(nested).build()?)

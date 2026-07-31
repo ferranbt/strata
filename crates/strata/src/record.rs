@@ -1,17 +1,11 @@
-//! The Arrow record layer: strata's internal data currency.
-//!
-//! Inside the framework, data travels as Arrow record batches — never JSON. This
-//! module owns the one mapping between the native [`schema::DataType`] and an
-//! Arrow [`Schema`] (the `schema` crate itself stays Arrow-agnostic). JSON only
-//! appears at named edges outside here: CLI display and JSON-native backends.
-
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
-use arrow::datatypes::{
-    DataType as ArrowType, Field, FieldRef, Fields, Schema, SchemaRef, TimeUnit,
-};
+use arrow::datatypes::{DataType as ArrowType, Field, FieldRef, Fields, TimeUnit};
 use arrow::record_batch::RecordBatch;
+use arrow_array::Array;
+use arrow_schema::Schema;
+use futures::stream::{BoxStream, StreamExt};
 use schema::{Annotations, DataType, Schema as StrataSchema};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -19,68 +13,66 @@ use serde_json::Value;
 
 use crate::page::Cursor;
 
-/// A batch of rows in strata's internal Arrow form — the currency that flows
-/// reader → writer. `schema` is carried once; `batches` are the rows.
-///
-/// The two methods here are the *only* sanctioned conversions between Arrow and
-/// other representations: [`encode`](Records::encode) (typed handler output →
-/// Arrow) and [`to_json_rows`](Records::to_json_rows) (Arrow → JSON, for display
-/// only). JSON → Arrow is deliberately absent: it belongs inside the specific
-/// JSON-native providers that own that edge, not here.
-#[derive(Debug, Clone)]
-pub struct Records {
-    pub schema: SchemaRef,
-    pub batches: Vec<RecordBatch>,
+pub struct DataStream {
+    pub schema: StrataSchema,
+    pub chunks: BoxStream<'static, Result<BatchPage>>,
 }
 
-impl Records {
-    /// Encode typed handler output (`items: &[T]`) into Arrow, driven by the
-    /// endpoint's resolved [`Schema`](StrataSchema). The single typed→Arrow site —
-    /// used by `list` dispatch so provider structs never travel as JSON.
-    pub fn encode<T: Serialize>(schema: StrataSchema, items: &[T]) -> Result<Records> {
-        let fields = strata_schema_to_arrow_fields(&schema);
-        let field_refs: Vec<FieldRef> = fields.iter().cloned().collect();
-        let arrow_schema = Arc::new(Schema::new(fields));
-        let arrays = serde_arrow::to_arrow(&field_refs, items)
-            .map_err(|e| anyhow!("arrow encode failed: {e}"))?;
-        let batch = RecordBatch::try_new(arrow_schema.clone(), arrays)?;
-        Ok(Records {
-            schema: arrow_schema,
-            batches: vec![batch],
-        })
+impl DataStream {
+    pub async fn first(mut self) -> Result<Option<BatchPage>> {
+        self.chunks.next().await.transpose()
     }
+}
+pub struct BatchPage {
+    pub data: Batch,
+    pub cursor: Option<Cursor>,
+}
 
-    /// Total row count across the batches — the "did this page bring anything?"
-    /// signal the sync layer reads to detect the tail of an unbounded (`NextLink`)
-    /// walk, where the cursor never goes `None`.
-    pub fn row_count(&self) -> usize {
-        self.batches.iter().map(|b| b.num_rows()).sum()
-    }
+#[derive(Debug, Clone)]
+pub struct Batch {
+    columns: Vec<Arc<dyn Array>>,
+}
 
-    /// Decode to JSON rows — the Arrow→JSON **display** edge (e.g. `strata call`
-    /// output) and the interim sink bridge. Never call this for internal
-    /// transport; that stays Arrow.
-    pub fn to_json_rows(&self) -> Result<Vec<Value>> {
-        let mut rows = Vec::new();
-        for batch in &self.batches {
-            let batch_rows: Vec<Value> = serde_arrow::from_record_batch(batch)
-                .map_err(|e| anyhow!("arrow decode failed: {e}"))?;
-            rows.extend(batch_rows);
-        }
+impl Batch {
+    pub fn to_json_rows(&self, schema: &StrataSchema) -> Result<Vec<Value>> {
+        let arrow_schema = strata_schema_to_arrow_schema(schema);
+        let mut rows: Vec<Value> = serde_arrow::from_arrow(arrow_schema.fields(), &self.columns)
+            .map_err(|e| anyhow!("arrow decode failed: {e}"))?;
+
         // serde_arrow decodes temporal columns to raw integers (µs / epoch days);
         // render them as ISO strings so they're readable and re-parseable by a
         // sink (a `timestamptz`/`date` column can't ingest a bare integer).
-        temporals_to_iso(&self.schema, &mut rows);
+        temporals_to_iso(&arrow_schema, &mut rows);
         Ok(rows)
     }
 
-    /// Decode the batch's rows into typed values — the Arrow→`T` convenience for
-    /// callers (and tests) that know the row type.
-    pub fn decode<T: DeserializeOwned>(&self) -> Result<Vec<T>> {
-        self.to_json_rows()?
+    pub fn decode<T: DeserializeOwned>(&self, schema: &StrataSchema) -> Result<Vec<T>> {
+        self.to_json_rows(schema)?
             .into_iter()
-            .map(|v| Ok(serde_json::from_value(v)?))
+            .map(|row| Ok(serde_json::from_value(row)?))
             .collect()
+    }
+
+    pub fn encode<T: Serialize>(schema: &StrataSchema, items: &[T]) -> Result<Batch> {
+        let fields = strata_schema_to_arrow_fields(schema);
+        let columns = serde_arrow::to_arrow(&fields, items)
+            .map_err(|e| anyhow!("arrow encode failed: {e}"))?;
+        Ok(Batch { columns })
+    }
+
+    pub fn row_count(&self) -> usize {
+        self.columns.first().map(|c| c.len()).unwrap_or(0)
+    }
+
+    pub fn from_record_batch(batch: &RecordBatch) -> Batch {
+        Batch {
+            columns: batch.columns().to_vec(),
+        }
+    }
+
+    pub fn to_record_batch(&self, schema: &StrataSchema) -> Result<RecordBatch> {
+        let arrow_schema = Arc::new(strata_schema_to_arrow_schema(schema));
+        Ok(RecordBatch::try_new(arrow_schema, self.columns.clone())?)
     }
 }
 
@@ -117,15 +109,6 @@ fn temporals_to_iso(schema: &Schema, rows: &mut [Value]) {
             }
         }
     }
-}
-
-/// A page of Arrow rows produced directly by a handler — the return of an
-/// Arrow-native `list` (see `Route::list_records`). Used when the row schema is
-/// dynamic (e.g. a SQL table's columns), so the provider reads its own schema and
-/// builds the batch rather than the framework encoding a static type.
-pub struct RecordPage {
-    pub data: Records,
-    pub cursor: Cursor,
 }
 
 /// Prepare a source provider's JSON rows for [`Records::encode`] against
@@ -278,8 +261,8 @@ mod tests {
             serde_json::json!({"n": 1, "s": "a"}),
             serde_json::json!({"n": 2, "s": null}),
         ];
-        let records = Records::encode(schema, &items).unwrap();
-        assert_eq!(records.batches[0].num_rows(), 2);
-        assert_eq!(records.to_json_rows().unwrap(), items);
+        let batch = Batch::encode(&schema, &items).unwrap();
+        assert_eq!(batch.row_count(), 2);
+        assert_eq!(batch.to_json_rows(&schema).unwrap(), items);
     }
 }

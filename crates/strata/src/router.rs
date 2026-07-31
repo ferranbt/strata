@@ -19,9 +19,10 @@ use serde_json::Value;
 
 use futures::StreamExt;
 
-use crate::dataset::{Chunk, DataStream, Disposition};
+use crate::DataStream;
+use crate::dataset::Disposition;
 use crate::page::{Cursor, ListStrategy, Page};
-use crate::record::{RecordPage, Records};
+use crate::record::{Batch, BatchPage};
 
 /// A boxed, owned future. `'static` because handlers take owned `Params` and an
 /// `Arc<S>`, so nothing is borrowed across the await.
@@ -260,7 +261,7 @@ impl std::fmt::Display for Method {
 /// `cursor` is never a column/row: the CLI renders it in a `{ items, cursor }`
 /// envelope, Flight in `app_metadata`.
 pub struct Response {
-    pub data: Option<Records>,
+    pub data: Option<Batch>,
     pub cursor: Option<Cursor>,
     pub entity: Option<Value>,
     pub output: Value,
@@ -422,7 +423,7 @@ where
             // cursor stays out-of-band.
             let page = fut.await?;
             Ok(Response {
-                data: Some(Records::encode(T::schema(), &page.items)?),
+                data: Some(Batch::encode(&T::schema(), &page.items)?),
                 cursor: Some(page.cursor),
                 entity: None,
                 output: Value::Null,
@@ -438,7 +439,7 @@ fn erase_list_records<S, F, Fut>(handler: F) -> ErasedHandler<S>
 where
     S: Send + Sync + 'static,
     F: Fn(Arc<S>, Params) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = Result<RecordPage>> + Send + 'static,
+    Fut: Future<Output = Result<BatchPage>> + Send + 'static,
 {
     Arc::new(move |state, params, _body| {
         let fut = handler(state, params);
@@ -446,7 +447,7 @@ where
             let page = fut.await?;
             Ok(Response {
                 data: Some(page.data),
-                cursor: Some(page.cursor),
+                cursor: page.cursor,
                 entity: None,
                 output: Value::Null,
             })
@@ -573,7 +574,7 @@ impl<S: Send + Sync + 'static> Route<S> {
     pub fn list_records<F, Fut>(mut self, handler: F) -> Self
     where
         F: Fn(Arc<S>, Params) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = Result<RecordPage>> + Send + 'static,
+        Fut: Future<Output = Result<BatchPage>> + Send + 'static,
     {
         self.method = Method::List;
         self.handler = Some(erase_list_records(handler));
@@ -823,13 +824,13 @@ impl<S: Send + Sync + 'static> Router<S> {
                     Ok(response) => response,
                     Err(e) => return Some((Err(e), None)),
                 };
-                let records = match response.data {
+                let batch = match response.data {
                     Some(records) => records,
                     None => return Some((Err(anyhow!("list handler returned no data")), None)),
                 };
                 let next = response.cursor.as_ref().and_then(|c| c.next.clone());
-                let chunk = Chunk {
-                    records,
+                let chunk = BatchPage {
+                    data: batch,
                     cursor: response.cursor,
                 };
                 Some((Ok(chunk), next.map(Some)))

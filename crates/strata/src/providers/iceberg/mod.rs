@@ -29,10 +29,10 @@ mod convert;
 
 use convert::{align_to, iceberg_to_strata_schema, strata_to_iceberg_schema};
 
-use crate::dataset::{DataStream, Disposition};
+use crate::dataset::Disposition;
 use crate::page::{Cursor, ListStrategy, Page};
 use crate::provider::Provider;
-use crate::record::{RecordPage, Records};
+use crate::record::{Batch, BatchPage, DataStream};
 use crate::router::{Params, Route, Router};
 
 /// All strata tables live in one namespace.
@@ -213,7 +213,7 @@ async fn get_table(ice: Arc<Iceberg>, p: Params) -> Result<TableInfo> {
 /// Scan the table's current rows (offset-paginated), Arrow-native: the rows cross
 /// the 57/59 boundary as JSON, then re-encode against the table's resolved
 /// [`Schema`] — so the batch has the real columns, not an empty placeholder.
-async fn scan(ice: Arc<Iceberg>, p: Params) -> Result<RecordPage> {
+async fn scan(ice: Arc<Iceberg>, p: Params) -> Result<BatchPage> {
     let name = p.get("table")?;
     let catalog = ice.catalog().await?;
     let table = catalog.load_table(&table_ident(name)).await?;
@@ -265,6 +265,9 @@ async fn scan(ice: Arc<Iceberg>, p: Params) -> Result<RecordPage> {
         .iter()
         .map(|batch| align_to(&arrow_schema, batch))
         .collect::<Result<Vec<_>>>()?;
+    // A page is one batch, so the slices taken across the scan's batches are
+    // concatenated; an empty page yields a batch with no rows.
+    let page = arrow::compute::concat_batches(&arrow_schema, &batches)?;
 
     let cursor = if has_next {
         Cursor::new(&IcebergCursor {
@@ -273,12 +276,9 @@ async fn scan(ice: Arc<Iceberg>, p: Params) -> Result<RecordPage> {
     } else {
         Cursor::empty()
     };
-    Ok(RecordPage {
-        data: Records {
-            schema: arrow_schema,
-            batches,
-        },
-        cursor,
+    Ok(BatchPage {
+        data: Batch::from_record_batch(&page),
+        cursor: Some(cursor),
     })
 }
 
@@ -299,10 +299,13 @@ async fn put_table(ice: Arc<Iceberg>, p: Params, stream: DataStream) -> Result<W
     if Disposition::from_param(p.query(Disposition::PARAM))? == Disposition::Merge {
         bail!("iceberg sink supports only `append` (merge is not yet implemented)");
     }
-    // Iceberg isn't streaming yet: drain the stream into one dataset, then commit.
-    let data = stream.collect().await?;
-    let fields = data.schema.fields.clone();
-    if fields.is_empty() {
+    // The stream's schema is the sink contract; its batches are written as they
+    // arrive and committed together as one snapshot.
+    let DataStream {
+        schema,
+        mut chunks,
+    } = stream;
+    if schema.fields.is_empty() {
         bail!("dataset schema has no columns");
     }
 
@@ -317,7 +320,7 @@ async fn put_table(ice: Arc<Iceberg>, p: Params, stream: DataStream) -> Result<W
     let table = if created {
         let creation = TableCreation::builder()
             .name(name.to_string())
-            .schema(strata_to_iceberg_schema(data.schema)?)
+            .schema(strata_to_iceberg_schema(&schema)?)
             .build();
         catalog.create_table(&ns, creation).await?
     } else {
@@ -353,13 +356,13 @@ async fn put_table(ice: Arc<Iceberg>, p: Params, stream: DataStream) -> Result<W
         file_name_gen,
     );
     let mut writer = DataFileWriterBuilder::new(rolling).build(None).await?;
-    // Write the dataset's Arrow batches straight through — no JSON round-trip.
+    // Write the stream's Arrow batches straight through — no JSON round-trip.
     let mut rows_written = 0u64;
-    for batch in &data.records.batches {
-        if batch.num_rows() == 0 {
+    while let Some(chunk) = chunks.try_next().await? {
+        if chunk.data.row_count() == 0 {
             continue;
         }
-        let aligned = align_to(&arrow_schema, batch)?;
+        let aligned = align_to(&arrow_schema, &chunk.data.to_record_batch(&schema)?)?;
         rows_written += aligned.num_rows() as u64;
         writer.write(aligned).await?;
     }

@@ -22,10 +22,10 @@ use schema::{DataType, HasSchema, Schema};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::dataset::{DataStream, Dataset, Disposition};
+use crate::dataset::{Dataset, Disposition};
 use crate::page::{Cursor, ListStrategy, Page};
 use crate::provider::Provider;
-use crate::record::{RecordPage, Records, stringify_text_columns};
+use crate::record::{Batch, BatchPage, DataStream, stringify_text_columns};
 use crate::router::{Params, Route, Router};
 
 mod filter;
@@ -236,7 +236,10 @@ pub trait SqlSource: Send + Sync + 'static {
             };
             let mut rows_written = 0;
             while let Some(chunk) = chunks.next().await {
-                let dataset = Dataset::new(schema.clone(), chunk?.records);
+                // TODO: We still create a dataset object, later on we should send
+                // the stream directly to the SQL provider but we would need a way for the provider
+                // to notify which batch has been written.
+                let dataset = Dataset::new(schema.clone(), chunk?.data);
                 rows_written += self
                     .write_table(table, dataset, disposition)
                     .await?
@@ -343,7 +346,7 @@ pub async fn table_get<S: SqlSource>(db: Arc<S>, p: Params) -> Result<Value> {
 
 /// `list_records /tables/:table/data`: a page of a table's rows as typed Arrow
 /// columns, offset-paginated.
-pub async fn table_data<S: SqlSource>(db: Arc<S>, p: Params) -> Result<RecordPage> {
+pub async fn table_data<S: SqlSource>(db: Arc<S>, p: Params) -> Result<BatchPage> {
     let name = p.get("table")?;
     // The full table schema drives the fetch (cursor column, filter columns); the
     // projected schema governs what's returned. The cursor is resolved off the full
@@ -367,8 +370,11 @@ pub async fn table_data<S: SqlSource>(db: Arc<S>, p: Params) -> Result<RecordPag
     }
     stringify_text_columns(&schema, &mut rows);
     normalize_temporals(&schema, &mut rows);
-    let data = Records::encode(schema.clone(), &rows)?;
-    Ok(RecordPage { data, cursor: next })
+    let data = Batch::encode(&schema, &rows)?;
+    Ok(BatchPage {
+        data,
+        cursor: Some(next),
+    })
 }
 
 /// Rewrite `Timestamp`/`Date` columns to their canonical string form so

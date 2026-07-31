@@ -136,13 +136,17 @@ async fn run() -> Result<()> {
             let display = match method {
                 // Data plane: read the stream and show the first chunk (one page)
                 // as `{ items, cursor }`. Drain the whole stream with `--follow`.
-                Verb::List => match provider.read(&path).await?.first().await? {
-                    Some(chunk) => serde_json::json!({
-                        "items": chunk.records.to_json_rows()?,
-                        "cursor": chunk.cursor,
-                    }),
-                    None => serde_json::json!({ "items": [], "cursor": null }),
-                },
+                Verb::List => {
+                    let stream = provider.read(&path).await?;
+                    let schema = stream.schema.clone();
+                    match stream.first().await? {
+                        Some(chunk) => serde_json::json!({
+                            "items": chunk.data.to_json_rows(&schema)?,
+                            "cursor": chunk.cursor,
+                        }),
+                        None => serde_json::json!({ "items": [], "cursor": null }),
+                    }
+                }
                 // Entity plane: `get` takes no body; `create` reads its JSON entity
                 // from stdin (the `meta` channel).
                 Verb::Get | Verb::Create => {
@@ -290,12 +294,13 @@ fn strip_query(path: &str) -> &str {
 /// this just consumes the stream to the tail.
 async fn follow_list(provider: &dyn strata::ProviderObject, path: &str) -> Result<()> {
     let mut stream = provider.read(path).await?;
+    let schema = stream.schema.clone();
     let mut page = 1;
     while let Some(chunk) = stream.chunks.next().await {
         let chunk = chunk?;
         let output = serde_json::json!({
             "page": page,
-            "items": chunk.records.to_json_rows()?,
+            "items": chunk.data.to_json_rows(&schema)?,
             "cursor": chunk.cursor,
         });
         println!("{}", serde_json::to_string_pretty(&output)?);
