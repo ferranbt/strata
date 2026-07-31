@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::datagen::Generator;
 use crate::page::{Cursor, ListStrategy};
 use crate::provider::Provider;
-use crate::record::RecordPage;
+use crate::record::BatchPage;
 use crate::router::{Params, Route, Router};
 
 const DEFAULT_LIMIT: u32 = 100;
@@ -57,7 +57,7 @@ async fn types_schema(_d: Arc<Dummy>, p: Params) -> Result<Schema> {
 }
 
 /// One page of generated rows — a pure range of the generator, no state, no I/O.
-async fn generate(_d: Arc<Dummy>, p: Params) -> Result<RecordPage> {
+async fn generate(_d: Arc<Dummy>, p: Params) -> Result<BatchPage> {
     let generator = Generator::new(&types(&p)?)?
         .seed(p.query("seed").and_then(|v| v.parse().ok()).unwrap_or(0));
 
@@ -78,5 +78,8 @@ async fn generate(_d: Arc<Dummy>, p: Params) -> Result<RecordPage> {
     } else {
         Cursor::empty()
     };
-    Ok(RecordPage { data, cursor: next })
+    Ok(BatchPage {
+        data,
+        cursor: Some(next),
+    })
 }

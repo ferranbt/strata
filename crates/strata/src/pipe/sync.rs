@@ -17,10 +17,10 @@
 //!   chunk that brought no rows means we've reached the live edge for now, so the
 //!   driver stops pulling and drops the (otherwise infinite) stream.
 
-use crate::dataset::Chunk;
 use crate::page::ListStrategy;
+use crate::record::BatchPage;
 
-/// What the sync driver should do after writing one [`Chunk`].
+/// What the sync driver should do after writing one [`BatchPage`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Progress {
     /// More to pull right now: keep consuming the live stream. The token is this
@@ -36,7 +36,7 @@ pub enum Progress {
 ///
 /// `Offset` follows the cursor until it goes `None`; `NextLink`'s cursor never goes
 /// `None`, so it stops when a page comes back empty. See the module docs.
-pub fn advance(strategy: ListStrategy, chunk: &Chunk) -> Progress {
+pub fn advance(strategy: ListStrategy, chunk: &BatchPage) -> Progress {
     let next = chunk.cursor.as_ref().and_then(|c| c.next.clone());
     match strategy {
         // Finite backfill: drain while the cursor advances; `None` is the tail.
@@ -49,7 +49,7 @@ pub fn advance(strategy: ListStrategy, chunk: &Chunk) -> Progress {
         // `None` — marks the live edge. When caught up, resume from the same
         // forward position so the next run picks up whatever has since arrived.
         ListStrategy::NextLink => {
-            if chunk.records.row_count() == 0 {
+            if chunk.data.row_count() == 0 {
                 Progress::CaughtUp(next)
             } else {
                 match next {

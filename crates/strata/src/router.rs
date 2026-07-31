@@ -423,9 +423,7 @@ where
             // cursor stays out-of-band.
             let page = fut.await?;
             Ok(Response {
-                // data: Some(Records::encode(T::schema(), &page.items)?),
-                // TODO: record fix
-                data: None,
+                data: Some(Batch::encode(&T::schema(), &page.items)?),
                 cursor: Some(page.cursor),
                 entity: None,
                 output: Value::Null,

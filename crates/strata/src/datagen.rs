@@ -45,7 +45,7 @@ impl Generator {
     pub fn rows(&self, range: Range<usize>) -> Result<Batch> {
         let mut rows: Vec<Value> = range.map(|i| self.row(i)).collect();
         stringify_text_columns(&self.schema, &mut rows);
-        Batch::encode(self.schema.clone(), &rows)
+        Batch::encode(&self.schema, &rows)
     }
 
     /// The first `n` rows as a [`Dataset`] (schema + Arrow records).

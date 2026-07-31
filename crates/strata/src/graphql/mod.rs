@@ -110,12 +110,13 @@ async fn tables(registry: &Arc<Registry>, mount: &str) -> Vec<String> {
     let Ok(stream) = provider.read("/tables").await else {
         return Vec::new();
     };
+    let schema = stream.schema.clone();
     let Ok(Some(chunk)) = stream.first().await else {
         return Vec::new();
     };
     chunk
-        .records
-        .to_json_rows()
+        .data
+        .to_json_rows(&schema)
         .unwrap_or_default()
         .iter()
         .filter_map(|row| row.get("name")?.as_str().map(String::from))
@@ -197,8 +198,10 @@ fn nested_field(
                 serde_json::json!({ "cmp": { "field": target_col, "op": "eq", "value": fk } });
             let encoded = urlencoding::encode(&filter.to_string()).into_owned();
             let path = format!("/tables/{target_table}?filter={encoded}&limit=1");
-            let rows = match registry.get(&mount)?.read(&path).await?.first().await? {
-                Some(chunk) => chunk.records.to_json_rows()?,
+            let stream = registry.get(&mount)?.read(&path).await?;
+            let schema = stream.schema.clone();
+            let rows = match stream.first().await? {
+                Some(chunk) => chunk.data.to_json_rows(&schema)?,
                 None => Vec::new(),
             };
             Ok(rows.into_iter().next().map(FieldValue::owned_any))
@@ -249,8 +252,10 @@ fn table_field(
 
             let path = read_path(&table, filter.as_ref(), &fields, limit);
             let provider = registry.get(&mount)?;
-            let rows = match provider.read(&path).await?.first().await? {
-                Some(chunk) => chunk.records.to_json_rows()?,
+            let stream = provider.read(&path).await?;
+            let schema = stream.schema.clone();
+            let rows = match stream.first().await? {
+                Some(chunk) => chunk.data.to_json_rows(&schema)?,
                 None => Vec::new(),
             };
             Ok(Some(FieldValue::list(

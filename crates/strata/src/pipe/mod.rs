@@ -9,7 +9,7 @@ use futures::StreamExt;
 use serde_json::Value;
 use strata_types::Pipe;
 
-use crate::dataset::DataStream;
+use crate::record::DataStream;
 use crate::request::{ReadRequest, WriteRequest};
 use crate::router::Body;
 use crate::{Method, Registry};
@@ -48,7 +48,7 @@ pub async fn run_pass<S: PipeStore>(registry: &Registry, store: &S, pipe: &mut P
         let progress = sync::advance(strategy, &chunk);
 
         // Write the rows (skip an empty tail page — nothing to store).
-        let rows = chunk.records.row_count() as u64;
+        let rows = chunk.data.row_count() as u64;
         if rows > 0 {
             let page = DataStream {
                 schema: schema.clone(),
@@ -157,7 +157,7 @@ mod tests {
             let mut chunks = stream.chunks;
             let mut total = 0usize;
             while let Some(chunk) = chunks.next().await {
-                total += chunk?.records.row_count();
+                total += chunk?.data.row_count();
             }
             anyhow::Ok(total)
         };

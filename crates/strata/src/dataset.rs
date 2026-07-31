@@ -7,15 +7,13 @@
 //! over Arrow Flight the same `(schema, rows)` rides natively in a `DoPut`.
 
 use anyhow::{Result, bail};
-use arrow_array::RecordBatch;
-use futures::stream::{BoxStream, StreamExt};
+use futures::stream::StreamExt;
 use schema::Schema;
 use serde::Serialize;
 use serde_json::Value;
 
 use crate::{
     DataStream,
-    page::Cursor,
     record::{Batch, BatchPage},
 };
 
@@ -83,7 +81,7 @@ impl Dataset {
     /// against it. The typed-input counterpart of a `put`.
     pub fn of<T: serde::Serialize + schema::HasSchema>(rows: &[T]) -> Result<Self> {
         let schema = T::schema();
-        let records = Batch::encode(schema.clone(), rows)?;
+        let records = Batch::encode(&schema, rows)?;
         Ok(Dataset::new(schema, records))
     }
 

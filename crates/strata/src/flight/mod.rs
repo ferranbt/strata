@@ -28,8 +28,10 @@ use tonic::transport::Server;
 use tonic::{Request, Response, Status, Streaming};
 
 use crate::Registry;
-use crate::dataset::{Chunk, DataStream};
-use crate::record::{Records, arrow_schema_to_strata, strata_schema_to_arrow_schema};
+use crate::record::{
+    Batch, BatchPage, DataStream, arrow_schema_to_strata, strata_schema_to_arrow_schema,
+};
+use schema::Schema as StrataSchema;
 use crate::router::{Body, Method};
 
 /// Start the Flight server on `addr`, serving every registered provider.
@@ -115,20 +117,20 @@ fn ticket_target(ticket: &Ticket) -> Result<(String, String), Status> {
 
 type FlightStream<T> = BoxStream<'static, Result<T, Status>>;
 
-/// Encode one [`Chunk`] (a page): its batches as Arrow `FlightData`, then a
-/// metadata-only message whose `app_metadata` is the chunk's cursor (when present)
-/// — the per-batch checkpoint, forwarded opaquely.
-fn encode_chunk(chunk: Chunk) -> FlightStream<FlightData> {
-    let Chunk { records, cursor } = chunk;
-    let schema = records.schema.clone();
-    let batches = futures::stream::iter(
-        records
-            .batches
-            .into_iter()
-            .map(Ok::<RecordBatch, FlightError>),
-    );
+/// Encode one [`BatchPage`]: its columns as Arrow `FlightData`
+fn encode_chunk(chunk: BatchPage, schema: &StrataSchema) -> FlightStream<FlightData> {
+    let BatchPage { data, cursor } = chunk;
+    let batch = match data.to_record_batch(schema) {
+        Ok(batch) => batch,
+        Err(e) => {
+            return futures::stream::once(async move { Err(Status::internal(e.to_string())) })
+                .boxed();
+        }
+    };
+    let arrow_schema = batch.schema();
+    let batches = futures::stream::iter([Ok::<RecordBatch, FlightError>(batch)]);
     let data = FlightDataEncoderBuilder::new()
-        .with_schema(schema)
+        .with_schema(arrow_schema)
         .build(batches)
         .map(|d| d.map_err(|e| Status::internal(e.to_string())));
     let trailer = cursor.map(|cursor| {
@@ -225,10 +227,11 @@ impl FlightService for StrataFlight {
             .read(&path)
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
+        let schema = stream.schema.clone();
         let out = stream
             .chunks
-            .flat_map(|chunk| match chunk {
-                Ok(chunk) => encode_chunk(chunk),
+            .flat_map(move |chunk| match chunk {
+                Ok(chunk) => encode_chunk(chunk, &schema),
                 Err(e) => {
                     futures::stream::once(async move { Err(Status::internal(e.to_string())) })
                         .boxed()
@@ -291,24 +294,19 @@ impl FlightService for StrataFlight {
             .clone();
         let schema = arrow_schema_to_strata(&arrow_schema);
 
-        // One chunk per batch; the tail streams lazily. No cursor on the write path.
-        let rest_schema = arrow_schema.clone();
-        let head_chunk = futures::stream::iter(first_batch.map(move |batch| {
-            Ok::<_, anyhow::Error>(Chunk {
-                records: Records {
-                    schema: arrow_schema,
-                    batches: vec![batch],
-                },
+        // One page per batch; the tail streams lazily. No cursor on the write path.
+        // The first batch was pulled only to make the schema available, so it is put
+        // back on the front here.
+        let head_chunk = futures::stream::iter(first_batch.map(|batch| {
+            Ok::<_, anyhow::Error>(BatchPage {
+                data: Batch::from_record_batch(&batch),
                 cursor: None,
             })
         }));
-        let rest_chunks = decoder.map(move |batch| {
+        let rest_chunks = decoder.map(|batch| {
             let batch = batch.map_err(|e| anyhow::anyhow!(e.to_string()))?;
-            Ok(Chunk {
-                records: Records {
-                    schema: rest_schema.clone(),
-                    batches: vec![batch],
-                },
+            Ok(BatchPage {
+                data: Batch::from_record_batch(&batch),
                 cursor: None,
             })
         });
