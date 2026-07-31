@@ -57,18 +57,31 @@ impl Generator {
 /// A deterministic value for `field` at row `i` — monotonic in `i`, so a `key`
 /// column is unique and a `cursor` column is ascending.
 fn value_for(field: &Field, i: usize) -> Value {
-    match field.data_type {
+    value_of(&field.data_type, &field.name, i)
+}
+
+/// The same as `value_for` but addressed by type rather than by field, so a `List`'s element and a
+/// `Struct`'s members can recurse.
+fn value_of(data_type: &DataType, name: &str, i: usize) -> Value {
+    match data_type {
         DataType::Bool => json!(i.is_multiple_of(2)),
         DataType::Int64 => json!(i as i64),
         DataType::UInt64 => json!(i as u64),
         DataType::Float64 => json!(i as f64),
         DataType::Decimal => json!(i.to_string()),
-        DataType::String => json!(format!("{}-{i}", field.name)),
+        DataType::String => json!(format!("{name}-{i}")),
         DataType::Timestamp => json!(iso_timestamp(i)),
         DataType::Date => json!(iso_date(i)),
         DataType::Json => json!({ "i": i }),
-        // Rejected up-front by `Generator::new`.
-        DataType::Bytes | DataType::List(_) | DataType::Struct(_) => Value::Null,
+        DataType::List(inner) => json!([value_of(inner, name, i)]),
+        DataType::Struct(fields) => Value::Object(
+            fields
+                .iter()
+                .map(|f| (f.name.clone(), value_for(f, i)))
+                .collect(),
+        ),
+        // No deterministic rendering that survives the Arrow `Binary` mapping.
+        DataType::Bytes => Value::Null,
     }
 }
 

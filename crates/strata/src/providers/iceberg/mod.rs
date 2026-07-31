@@ -9,7 +9,7 @@ use tokio::sync::Mutex;
 
 use arrow_array::RecordBatch;
 use config_macro::config;
-use futures::TryStreamExt;
+use futures::{StreamExt, TryStreamExt};
 use iceberg::transaction::{ApplyTransactionAction, Transaction};
 use iceberg::writer::base_writer::data_file_writer::DataFileWriterBuilder;
 use iceberg::writer::file_writer::ParquetWriterBuilder;
@@ -33,7 +33,7 @@ use crate::dataset::Disposition;
 use crate::page::{Cursor, ListStrategy, Page};
 use crate::provider::Provider;
 use crate::record::{Batch, BatchPage, DataStream};
-use crate::router::{Params, Route, Router};
+use crate::router::{Pages, Params, Route, Router};
 
 /// All strata tables live in one namespace.
 const NAMESPACE: &str = "strata";
@@ -111,7 +111,7 @@ impl Provider for Iceberg {
         r.add(
             Route::new()
                 .path("/tables/:table")
-                .list_records(scan)
+                .list_stream(scan)
                 .data_type(scan_schema)
                 .strategy(ListStrategy::Offset),
         );
@@ -210,74 +210,73 @@ async fn get_table(ice: Arc<Iceberg>, p: Params) -> Result<TableInfo> {
     })
 }
 
-/// Scan the table's current rows (offset-paginated), Arrow-native: the rows cross
-/// the 57/59 boundary as JSON, then re-encode against the table's resolved
-/// [`Schema`] — so the batch has the real columns, not an empty placeholder.
-async fn scan(ice: Arc<Iceberg>, p: Params) -> Result<BatchPage> {
-    let name = p.get("table")?;
+/// Scan the table's current rows, Arrow-native: iceberg's own batch stream is the
+/// read, so the scan is opened once and each batch becomes a page. A resume cursor
+/// skips the batches ahead of it rather than re-scanning from the start per page.
+async fn scan(ice: Arc<Iceberg>, p: Params) -> Result<Pages> {
+    let name = p.get("table")?.to_string();
     let catalog = ice.catalog().await?;
-    let table = catalog.load_table(&table_ident(name)).await?;
-
-    let cursor: IcebergCursor = p.cursor()?;
-    let offset = cursor.offset as usize;
-    let limit = p.limit(DEFAULT_LIMIT, MAX_LIMIT) as usize;
-
-    // Slice the page straight out of the Arrow stream — no JSON hop now that iceberg
-    // and the record layer share one Arrow version. Skip whole batches before the
-    // window; stop once the page is full.
-    let mut stream = table.scan().select_all().build()?.to_arrow().await?;
-    let mut scanned = 0usize;
-    let mut taken = 0usize;
-    let mut batches: Vec<RecordBatch> = Vec::new();
-    let mut has_next = false;
-    while taken < limit {
-        let Some(batch) = stream.try_next().await? else {
-            break;
-        };
-        let rows = batch.num_rows();
-        if scanned + rows <= offset {
-            scanned += rows;
-            continue;
-        }
-        let start = offset.saturating_sub(scanned);
-        let avail = rows - start;
-        let need = limit - taken;
-        if avail > need {
-            batches.push(batch.slice(start, need));
-            taken += need;
-            has_next = true; // rows left over in this batch
-            break;
-        }
-        batches.push(batch.slice(start, avail));
-        taken += avail;
-        scanned += rows;
-    }
-    // Filled exactly at a batch boundary: peek whether anything follows.
-    if taken == limit && !has_next {
-        has_next = stream.try_next().await?.is_some();
-    }
+    let table = catalog.load_table(&table_ident(&name)).await?;
 
     // Align to strata's Arrow mapping (notably `tz=UTC`, which serde_arrow requires
     // — iceberg emits `+00:00`). Metadata-only, still no JSON.
     let schema = iceberg_to_strata_schema(table.metadata().current_schema());
     let arrow_schema = Arc::new(crate::record::strata_schema_to_arrow_schema(&schema));
-    let batches = batches
-        .iter()
-        .map(|batch| align_to(&arrow_schema, batch))
-        .collect::<Result<Vec<_>>>()?;
-    // A page is one batch, so the slices taken across the scan's batches are
-    // concatenated; an empty page yields a batch with no rows.
-    let page = arrow::compute::concat_batches(&arrow_schema, &batches)?;
 
-    let cursor = if has_next {
+    let start: IcebergCursor = p.cursor()?;
+    let mut batches = table.scan().select_all().build()?.to_arrow().await?;
+
+    // Drop whole batches that end before the cursor, then slice the one it lands in.
+    let mut scanned = 0u32;
+    let mut pending = None;
+    while let Some(batch) = batches.try_next().await? {
+        let rows = batch.num_rows() as u32;
+        if scanned + rows <= start.offset {
+            scanned += rows;
+            continue;
+        }
+        let skip = (start.offset - scanned) as usize;
+        pending = Some(batch.slice(skip, batch.num_rows() - skip));
+        break;
+    }
+
+    // One batch ahead, so the final page can be told apart and close the cursor.
+    let pages = futures::stream::unfold(
+        (batches, pending, start.offset),
+        move |(mut batches, pending, offset)| {
+            let arrow_schema = arrow_schema.clone();
+            async move {
+                let batch = pending?;
+                let offset = offset + batch.num_rows() as u32;
+                let following = match batches.try_next().await {
+                    Ok(following) => following,
+                    Err(e) => return Some((Err(e.into()), (batches, None, offset))),
+                };
+                match scan_page(&arrow_schema, &batch, offset, following.is_some()) {
+                    Ok(page) => Some((Ok(page), (batches, following, offset))),
+                    Err(e) => Some((Err(e), (batches, None, offset))),
+                }
+            }
+        },
+    );
+    Ok(pages.boxed())
+}
+
+fn scan_page(
+    arrow_schema: &Arc<arrow_schema::Schema>,
+    batch: &RecordBatch,
+    next_offset: u32,
+    more: bool,
+) -> Result<BatchPage> {
+    let cursor = if more {
         Cursor::new(&IcebergCursor {
-            offset: (offset + limit) as u32,
+            offset: next_offset,
         })?
     } else {
         Cursor::empty()
     };
     Ok(BatchPage {
-        data: Batch::from_record_batch(&page),
+        data: Batch::from_record_batch(&align_to(arrow_schema, batch)?),
         cursor: Some(cursor),
     })
 }
@@ -301,10 +300,7 @@ async fn put_table(ice: Arc<Iceberg>, p: Params, stream: DataStream) -> Result<W
     }
     // The stream's schema is the sink contract; its batches are written as they
     // arrive and committed together as one snapshot.
-    let DataStream {
-        schema,
-        mut chunks,
-    } = stream;
+    let DataStream { schema, mut chunks } = stream;
     if schema.fields.is_empty() {
         bail!("dataset schema has no columns");
     }
@@ -406,17 +402,16 @@ struct WriteResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dataset::Dataset;
     use crate::testkit::Client;
     use schema::{Date, Timestamp};
 
-    #[derive(Debug, Serialize, Deserialize, HasSchema)]
+    #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, HasSchema)]
     struct Meta {
         key: String,
         weight: i64,
     }
 
-    #[derive(Debug, Serialize, Deserialize, HasSchema)]
+    #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, HasSchema)]
     struct Event {
         id: i64,
         name: String,
@@ -434,9 +429,7 @@ mod tests {
         Client::<Iceberg>::mount(&config)
     }
 
-    /// Round-trips a dataset through the arrow-native `put`/`scan` paths (no JSON
-    /// bridge): create + append, then read back — exercising the timestamp tz cast
-    /// and column alignment against a real local warehouse.
+    /// Round-trips a dataset through the arrow-native `put`/`scan` paths
     #[tokio::test]
     async fn put_then_scan_roundtrips() -> Result<()> {
         let dir = std::env::temp_dir()
@@ -446,63 +439,20 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
         let c = client(&dir)?;
 
-        let events = vec![
-            Event {
-                id: 0,
-                name: "a".into(),
-                day: Date::parse("2024-01-01").unwrap(),
-                at: Timestamp::parse("2024-01-01T00:00:00Z").unwrap(),
-                tags: vec!["x".into(), "y".into()],
-                meta: Meta {
-                    key: "k0".into(),
-                    weight: 10,
-                },
-            },
-            Event {
-                id: 1,
-                name: "b".into(),
-                day: Date::parse("2024-02-02").unwrap(),
-                at: Timestamp::parse("2024-02-02T12:30:00Z").unwrap(),
-                tags: vec![],
-                meta: Meta {
-                    key: "k1".into(),
-                    weight: 20,
-                },
-            },
-            Event {
-                id: 2,
-                name: "c".into(),
-                day: Date::parse("2024-03-03").unwrap(),
-                at: Timestamp::parse("2024-03-03T23:59:59Z").unwrap(),
-                tags: vec!["z".into()],
-                meta: Meta {
-                    key: "k2".into(),
-                    weight: 30,
-                },
-            },
-        ];
-        let result: WriteResult = c.put("/tables/events", Dataset::of(&events)?).await?;
-        assert!(result.created);
-        assert_eq!(result.rows_written, 3);
+        const ROWS: usize = 100;
+        let generator = crate::datagen::Generator::new(&Event::schema())?;
+        let dataset = generator.dataset(ROWS)?;
+        let expected: Vec<Event> = dataset.records.decode(&dataset.schema)?;
 
-        let mut stream = c.list("/tables/events").await?;
-        let mut got: Vec<Event> = stream.next().await?;
+        let result: WriteResult = c.put("/tables/events", dataset).await?;
+        assert!(result.created);
+        assert_eq!(result.rows_written, ROWS as u64);
+
+        let mut stream = c.list::<Event>("/tables/events").await?;
+        let mut got = stream.consume_all().await?;
         got.sort_by_key(|e| e.id);
 
-        assert_eq!(got.iter().map(|e| e.id).collect::<Vec<_>>(), [0, 1, 2]);
-        assert_eq!(
-            got.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
-            ["a", "b", "c"]
-        );
-        // Date round-trips exactly; timestamp keeps its instant (rfc3339 renders UTC
-        // as `+00:00` rather than `Z`).
-        assert_eq!(got[0].day, Date::parse("2024-01-01").unwrap());
-        assert_eq!(got[0].at, Timestamp::parse("2024-01-01T00:00:00Z").unwrap());
-        // Nested types survive as real iceberg list/struct, not stringified text.
-        assert_eq!(got[0].tags, ["x", "y"]);
-        assert!(got[1].tags.is_empty());
-        assert_eq!(got[2].meta.key, "k2");
-        assert_eq!(got[2].meta.weight, 30);
+        assert_eq!(got, expected);
 
         std::fs::remove_dir_all(&dir).ok();
         Ok(())
