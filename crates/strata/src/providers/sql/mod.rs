@@ -550,6 +550,7 @@ fn next_cursor(cursor: &SqlCursor, returned: usize) -> Result<Cursor> {
 pub mod suite {
     use super::{TableName, WriteResult};
     use crate::provider::Provider;
+    use crate::record::DataStream;
     use crate::testkit::Client;
     use anyhow::Result;
     use schema::{DataType, HasSchema};

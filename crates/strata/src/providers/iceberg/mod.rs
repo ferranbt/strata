@@ -440,11 +440,14 @@ mod tests {
         let c = client(&dir)?;
 
         const ROWS: usize = 100;
-        let generator = crate::datagen::Generator::new(&Event::schema())?;
-        let dataset = generator.stream(ROWS)?;
-        let expected: Vec<Event> = dataset.records.decode(&dataset.schema)?;
+        let schema = Event::schema();
+        let generator = crate::datagen::Generator::new(&schema)?;
+        let batch = generator.rows(0..ROWS)?;
+        let expected: Vec<Event> = batch.decode(&schema)?;
 
-        let result: WriteResult = c.put("/tables/events", dataset).await?;
+        let result: WriteResult = c
+            .put("/tables/events", DataStream::once(schema, batch))
+            .await?;
         assert!(result.created);
         assert_eq!(result.rows_written, ROWS as u64);
 
