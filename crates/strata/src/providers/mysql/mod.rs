@@ -390,6 +390,7 @@ mod tests {
         sql::suite::filters_rows(&client).await?;
         sql::suite::projects_columns(&client).await?;
         sql::suite::gets_single_row(&client).await?;
+        sql::suite::streams_whole_table(&client).await?;
         Ok(())
     }
 }

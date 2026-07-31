@@ -26,7 +26,7 @@ use crate::dataset::{Dataset, Disposition};
 use crate::page::{Cursor, ListStrategy, Page};
 use crate::provider::Provider;
 use crate::record::{Batch, BatchPage, DataStream, stringify_text_columns};
-use crate::router::{Params, Route, Router};
+use crate::router::{Pages, Params, Route, Router};
 
 mod filter;
 use filter::parse_filter;
@@ -303,7 +303,7 @@ pub trait SqlSource: Send + Sync + 'static {
         r.add(
             Route::new()
                 .path("/tables/:table")
-                .list_records(table_data::<Self>)
+                .list_stream(table_stream::<Self>)
                 .data_type(table_data_schema::<Self>)
                 .strategy(ListStrategy::Offset)
                 .queryable(),
@@ -344,37 +344,78 @@ pub async fn table_get<S: SqlSource>(db: Arc<S>, p: Params) -> Result<Value> {
     Ok(row)
 }
 
-/// `list_records /tables/:table/data`: a page of a table's rows as typed Arrow
-/// columns, offset-paginated.
-pub async fn table_data<S: SqlSource>(db: Arc<S>, p: Params) -> Result<BatchPage> {
-    let name = p.get("table")?;
+/// `list_stream /tables/:table`: a table's rows as typed Arrow columns, walked
+/// offset by offset. The provider owns the walk, so the table schema, projection,
+/// filter, and cursor column are resolved once for the whole read rather than on
+/// every page; each page is still a single [`SqlSource::table_rows`] call, so the
+/// dialect implementations are untouched.
+pub async fn table_stream<S: SqlSource>(db: Arc<S>, p: Params) -> Result<Pages> {
+    let name = p.get("table")?.to_string();
     // The full table schema drives the fetch (cursor column, filter columns); the
     // projected schema governs what's returned. The cursor is resolved off the full
     // schema so ordering works even when the cursor column is projected away.
     // TODO: Select the table fields at the provider level itself.
-    let full = enrich(db.table_schema(name).await?, p.schema());
+    let full = enrich(db.table_schema(&name).await?, p.schema());
     let projection = get_projection(&p);
     let schema = project_schema(&full, projection.as_deref())?;
 
-    // Hydrate the request-time fields: page size and the resolved cursor column.
-    let mut cursor: SqlCursor = p.cursor()?;
-    cursor.limit = p.limit(DEFAULT_LIMIT, MAX_LIMIT);
-    cursor.cursor = resolve_cursor(&p, &full);
-
+    let limit = p.limit(DEFAULT_LIMIT, MAX_LIMIT);
+    let cursor_column = resolve_cursor(&p, &full);
     let filter = p.query(FILTER_PARAM).map(parse_filter).transpose()?;
+    let start: SqlCursor = p.cursor()?;
 
-    let mut rows = db.table_rows(name, &cursor, filter.as_ref()).await?;
-    let next = next_cursor(&cursor, rows.len())?;
-    if projection.is_some() {
-        project_rows(&schema, &mut rows);
+    let pages = futures::stream::unfold(Some(start.offset), move |offset| {
+        let (db, name, schema) = (db.clone(), name.clone(), schema.clone());
+        let (projection, cursor_column, filter) =
+            (projection.clone(), cursor_column.clone(), filter.clone());
+
+        async move {
+            let offset = offset?;
+            let cursor = SqlCursor {
+                offset,
+                limit,
+                cursor: cursor_column,
+            };
+            let page = table_page(
+                db.as_ref(),
+                &name,
+                &schema,
+                &cursor,
+                filter.as_ref(),
+                projection.is_some(),
+            )
+            .await;
+            match page {
+                Ok((page, more)) => Some((Ok(page), more.then(|| offset + limit))),
+                Err(e) => Some((Err(e), None)),
+            }
+        }
+    });
+    Ok(pages.boxed())
+}
+
+/// One page of `table`, plus whether a further page may follow.
+async fn table_page<S: SqlSource>(
+    db: &S,
+    table: &str,
+    schema: &Schema,
+    cursor: &SqlCursor,
+    filter: Option<&Filter>,
+    projected: bool,
+) -> Result<(BatchPage, bool)> {
+    let mut rows = db.table_rows(table, cursor, filter).await?;
+    let next = next_cursor(cursor, rows.len())?;
+    if projected {
+        project_rows(schema, &mut rows);
     }
-    stringify_text_columns(&schema, &mut rows);
-    normalize_temporals(&schema, &mut rows);
-    let data = Batch::encode(&schema, &rows)?;
-    Ok(BatchPage {
-        data,
+    stringify_text_columns(schema, &mut rows);
+    normalize_temporals(schema, &mut rows);
+    let more = next.next.is_some();
+    let page = BatchPage {
+        data: Batch::encode(schema, &rows)?,
         cursor: Some(next),
-    })
+    };
+    Ok((page, more))
 }
 
 /// Rewrite `Timestamp`/`Date` columns to their canonical string form so
@@ -581,6 +622,41 @@ pub mod suite {
         let second: Vec<Event> = stream.next().await?;
         let ids: Vec<i64> = first.iter().chain(second.iter()).map(|e| e.id).collect();
         assert_eq!(ids, (0..20).collect::<Vec<i64>>());
+        Ok(())
+    }
+
+    /// A whole table drains through the read stream, across many pages.
+    pub async fn streams_whole_table<S: Provider>(client: &Client<S>) -> Result<()> {
+        const ROWS: usize = 2000;
+
+        let generator = crate::datagen::Generator::new(&Event::schema())?;
+        let result: WriteResult = client
+            .put("/tables/streamed", generator.dataset(ROWS)?)
+            .await?;
+        assert_eq!(result.rows_written, ROWS as u64);
+
+        let mut stream = client.list::<Event>("/tables/streamed").await?;
+        let mut ids = Vec::new();
+        let mut pages = 0;
+        while let Some(page) = stream.try_next().await? {
+            pages += 1;
+            ids.extend(page.into_iter().map(|event| event.id));
+        }
+
+        assert_eq!(
+            ids.len(),
+            ROWS,
+            "the stream must yield every row exactly once"
+        );
+        assert!(
+            pages > 1,
+            "{ROWS} rows must span several pages, got {pages}"
+        );
+        assert_eq!(
+            ids,
+            (0..ROWS as i64).collect::<Vec<i64>>(),
+            "rows must stay in cursor order across every page boundary"
+        );
         Ok(())
     }
 

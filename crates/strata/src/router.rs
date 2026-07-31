@@ -18,10 +18,11 @@ use serde::Serialize;
 use serde_json::Value;
 
 use futures::StreamExt;
+use futures::stream::BoxStream;
 
 use crate::DataStream;
 use crate::dataset::Disposition;
-use crate::page::{Cursor, ListStrategy, Page};
+use crate::page::{ListStrategy, Page};
 use crate::record::{Batch, BatchPage};
 
 /// A boxed, owned future. `'static` because handlers take owned `Params` and an
@@ -251,18 +252,13 @@ impl std::fmt::Display for Method {
 /// The outcome of dispatching a call. Concrete fields, one per channel — never a
 /// union, so the type is always known. A verb fills only its plane's field(s):
 ///
-/// - **Data plane** — `data` + `cursor`: a `list`'s **bulk rows** as Arrow
-///   [`Records`] (strata's internal currency, materialized today, streamed later);
-///   `cursor` is its out-of-band pagination.
 /// - **Entity plane** — `entity`: a `get`/`create`/`update`/`delete` result, ONE
 ///   JSON resource (possibly non-tabular). Off the Arrow stream channel.
 /// - `output`: a `put`'s **execution metadata** as JSON (rows written, etc.).
 ///
-/// `cursor` is never a column/row: the CLI renders it in a `{ items, cursor }`
-/// envelope, Flight in `app_metadata`.
+/// The data plane doesn't ride here: a `list` is a [`DataStream`], served by
+/// [`Router::dispatch_read`].
 pub struct Response {
-    pub data: Option<Batch>,
-    pub cursor: Option<Cursor>,
     pub entity: Option<Value>,
     pub output: Value,
 }
@@ -282,6 +278,48 @@ pub struct Body {
 type ErasedHandler<S> =
     Arc<dyn Fn(Arc<S>, Params, Option<Body>) -> BoxFuture<'static, Result<Response>> + Send + Sync>;
 
+pub type Pages = BoxStream<'static, Result<BatchPage>>;
+
+type ErasedPage<S> =
+    Arc<dyn Fn(Arc<S>, Params) -> BoxFuture<'static, Result<BatchPage>> + Send + Sync>;
+
+type ErasedStream<S> =
+    Arc<dyn Fn(Arc<S>, Params) -> BoxFuture<'static, Result<Pages>> + Send + Sync>;
+
+enum Handler<S> {
+    Unary(ErasedHandler<S>),
+    Stream(ErasedStream<S>),
+}
+
+/// Adapt a req/reply page handler into the stream primitive: call it, hand back
+/// its page, then call it again with that page's `cursor.next` until the cursor
+/// runs out. The sugar under [`Route::list`] and [`Route::list_records`].
+fn paged_stream<S: Send + Sync + 'static>(
+    handler: ErasedPage<S>,
+    state: Arc<S>,
+    base: Params,
+) -> Pages {
+    futures::stream::unfold(Some(None::<String>), move |token_state| {
+        let handler = handler.clone();
+        let state = state.clone();
+        let base = base.clone();
+        async move {
+            let token = token_state?;
+            let mut params = base.clone();
+            if let Some(token) = &token {
+                params.set_cursor(token);
+            }
+            let page = match handler(state, params).await {
+                Ok(page) => page,
+                Err(e) => return Some((Err(e), None)),
+            };
+            let next = page.cursor.as_ref().and_then(|c| c.next.clone());
+            Some((Ok(page), next.map(Some)))
+        }
+    })
+    .boxed()
+}
+
 /// A dynamic schema resolver: given state + the matched params, produces the
 /// endpoint's response `DataType` at request time (e.g. a SQL table's columns).
 type SchemaResolver<S> =
@@ -296,7 +334,7 @@ struct Entry<S> {
     pattern: Pattern,
     /// The verb this route answers; dispatch matches on `(pattern, method)`.
     method: Method,
-    handler: ErasedHandler<S>,
+    handler: Handler<S>,
     /// Schema of the request body for write verbs (`Json` for reads, which take
     /// no body).
     body_schema: Schema,
@@ -337,8 +375,6 @@ where
         Box::pin(async move {
             let value = fut.await?;
             Ok(Response {
-                data: None,
-                cursor: None,
                 entity: Some(serde_json::to_value(value)?),
                 output: Value::Null,
             })
@@ -367,8 +403,6 @@ where
         let fut = parsed.map(|b| handler(state, params, b));
         Box::pin(async move {
             Ok(Response {
-                data: None,
-                cursor: None,
                 entity: Some(serde_json::to_value(fut?.await?)?),
                 output: Value::Null,
             })
@@ -394,62 +428,8 @@ where
         Box::pin(async move {
             // The write result rides as JSON `output`; no bulk data, no entity.
             Ok(Response {
-                data: None,
-                cursor: None,
                 entity: None,
                 output: serde_json::to_value(fut?.await?)?,
-            })
-        })
-    })
-}
-
-/// Erase a list handler `(Arc<S>, Params, Q) -> Page<T>`: parse the typed query
-/// params `Q` from the call, run the handler, and split the [`Page`] into a
-/// [`Response`] whose `value` is the items and whose `cursor` is carried
-/// out-of-band.
-fn erase_list<S, T, F, Fut>(handler: F) -> ErasedHandler<S>
-where
-    S: Send + Sync + 'static,
-    T: Serialize + HasSchema + 'static,
-    F: Fn(Arc<S>, Params) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = Result<Page<T>>> + Send + 'static,
-{
-    Arc::new(move |state, params, _body| {
-        // Parse Q while we still hold `params`, then move `params` into the
-        // handler alongside it.
-        let fut = handler(state, params);
-        Box::pin(async move {
-            // Encode the page's rows straight to Arrow — the typed→Arrow site. The
-            // cursor stays out-of-band.
-            let page = fut.await?;
-            Ok(Response {
-                data: Some(Batch::encode(&T::schema(), &page.items)?),
-                cursor: Some(page.cursor),
-                entity: None,
-                output: Value::Null,
-            })
-        })
-    })
-}
-
-/// Erase an Arrow-native list handler `(Arc<S>, Params, Q) -> RecordPage`: the
-/// handler built its own batch (dynamic schema), so pass it straight through as
-/// `data` with the cursor out-of-band.
-fn erase_list_records<S, F, Fut>(handler: F) -> ErasedHandler<S>
-where
-    S: Send + Sync + 'static,
-    F: Fn(Arc<S>, Params) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = Result<BatchPage>> + Send + 'static,
-{
-    Arc::new(move |state, params, _body| {
-        let fut = handler(state, params);
-        Box::pin(async move {
-            let page = fut.await?;
-            Ok(Response {
-                data: Some(page.data),
-                cursor: page.cursor,
-                entity: None,
-                output: Value::Null,
             })
         })
     })
@@ -473,6 +453,7 @@ pub struct Route<S> {
     path: String,
     method: Method,
     handler: Option<ErasedHandler<S>>,
+    stream_handler: Option<ErasedStream<S>>,
     body_schema: Option<Schema>,
     response_schema: Option<Schema>,
     schema_resolver: Option<SchemaResolver<S>>,
@@ -488,6 +469,7 @@ impl<S: Send + Sync + 'static> Default for Route<S> {
             path: String::new(),
             method: Method::Get,
             handler: None,
+            stream_handler: None,
             body_schema: None,
             response_schema: None,
             schema_resolver: None,
@@ -555,32 +537,55 @@ impl<S: Send + Sync + 'static> Route<S> {
     /// reserved `cursor`); `T` is the item type (the response schema is
     /// `List<T>`). The handler reads the resume cursor via `params.cursor()` and
     /// returns the next/prev cursor in the [`Page`].
-    pub fn list<T, F, Fut>(mut self, handler: F) -> Self
+    pub fn list<T, F, Fut>(self, handler: F) -> Self
     where
         T: Serialize + HasSchema + 'static,
         F: Fn(Arc<S>, Params) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<Page<T>>> + Send + 'static,
     {
-        self.method = Method::List;
-        self.handler = Some(erase_list(handler));
-        self.response_schema = Some(T::schema());
-        self
+        let mut route = self.list_records(move |state, params| {
+            let fut = handler(state, params);
+            async move {
+                let page = fut.await?;
+                Ok(BatchPage {
+                    data: Batch::encode(&T::schema(), &page.items)?,
+                    cursor: Some(page.cursor),
+                })
+            }
+        });
+        route.response_schema = Some(T::schema());
+        route
     }
 
-    /// An Arrow-native `list`: `(Arc<S>, Params, Q) -> RecordPage`. The handler
+    /// An Arrow-native `list`: `(Arc<S>, Params, Q) -> BatchPage`. The handler
     /// builds its own batch — for endpoints whose row schema is dynamic (a SQL
     /// table's columns), so the provider reads its schema and encodes directly.
     /// Pair with [`data_type`](Self::data_type) to advertise the per-request schema.
-    pub fn list_records<F, Fut>(mut self, handler: F) -> Self
+    pub fn list_records<F, Fut>(self, handler: F) -> Self
     where
         F: Fn(Arc<S>, Params) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<BatchPage>> + Send + 'static,
     {
+        let handler: ErasedPage<S> =
+            Arc::new(move |state, params| Box::pin(handler(state, params)));
+        self.list_stream(move |state, params| {
+            let handler = handler.clone();
+            async move { Ok(paged_stream(handler, state, params)) }
+        })
+    }
+
+    /// The `List` primitive: `(Arc<S>, Params) -> Pages`. The provider owns the
+    /// whole walk, for sources that already have a stream (a SQL cursor, an Arrow
+    /// scan).
+    pub fn list_stream<F, Fut>(mut self, handler: F) -> Self
+    where
+        F: Fn(Arc<S>, Params) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<Pages>> + Send + 'static,
+    {
         self.method = Method::List;
-        self.handler = Some(erase_list_records(handler));
-        // Placeholder static schema; the real per-table schema comes from the
-        // `.data_type()` resolver.
-        self.response_schema = None; // TODO?
+        self.stream_handler = Some(Arc::new(move |state, params| {
+            Box::pin(handler(state, params))
+        }));
         self
     }
 
@@ -644,9 +649,13 @@ impl<S: Send + Sync + 'static> Route<S> {
         Entry {
             pattern: Pattern::parse(&self.path),
             method: self.method,
-            handler: self
-                .handler
-                .expect("route is missing a handler; call `.get`/`.list`/`.create`/`.upsert`"),
+            handler: match (self.handler, self.stream_handler) {
+                (_, Some(stream)) => Handler::Stream(stream),
+                (Some(unary), None) => Handler::Unary(unary),
+                (None, None) => panic!(
+                    "route is missing a handler; call `.get`/`.list`/`.list_stream`/`.create`/`.put`"
+                ),
+            },
             body_schema: self.body_schema.unwrap_or_else(Schema::empty),
             response_schema: self.response_schema.unwrap_or_else(Schema::empty),
             schema_resolver: self.schema_resolver,
@@ -790,16 +799,17 @@ impl<S: Send + Sync + 'static> Router<S> {
         body: Option<Body>,
     ) -> Result<Response> {
         let (route, params) = self.match_route(path, method).await?;
-        (route.handler)(state, params, body).await
+        match &route.handler {
+            Handler::Unary(handler) => handler(state, params, body).await,
+            Handler::Stream(_) => bail!(
+                "`{path}` is a data-plane read; call it through `read`, not `{method}` dispatch"
+            ),
+        }
     }
 
-    /// Auto-pick the `List` route matching `path` and return it as a real
-    /// [`DataStream`] — the data plane, for callers that consume the Arrow stream
-    /// (pipe, CLI, Flight `do_get`). Providers still return one `Page`/`RecordPage`
-    /// per call; the router *loops* that single-page handler here, feeding each
-    /// page's `cursor.next` back in, so a consumer just sees a stream of batches —
-    /// each [`Chunk`] carrying its page's cursor as a checkpoint. Entity reads
-    /// (`get`) are named explicitly via [`Router::dispatch`]; they aren't streams.
+    /// Auto-pick the `List` route matching `path` and return it as a [`DataStream`]
+    /// — the data plane, for callers that consume the Arrow stream (pipe, CLI,
+    /// Flight `do_get`).
     pub async fn dispatch_read(&self, state: Arc<S>, path: &str) -> Result<DataStream> {
         let (route, base) = self.match_route(path, Method::List).await?;
 
@@ -808,35 +818,10 @@ impl<S: Send + Sync + 'static> Router<S> {
             None => route.response_schema.clone(),
         };
 
-        let handler = route.handler.clone();
-
-        let chunks = futures::stream::unfold(Some(None::<String>), move |token_state| {
-            let handler = handler.clone();
-            let state = state.clone();
-            let base = base.clone();
-            async move {
-                let token = token_state?;
-                let mut params = base.clone();
-                if let Some(token) = &token {
-                    params.set_cursor(token);
-                }
-                let response = match handler(state, params, None).await {
-                    Ok(response) => response,
-                    Err(e) => return Some((Err(e), None)),
-                };
-                let batch = match response.data {
-                    Some(records) => records,
-                    None => return Some((Err(anyhow!("list handler returned no data")), None)),
-                };
-                let next = response.cursor.as_ref().and_then(|c| c.next.clone());
-                let chunk = BatchPage {
-                    data: batch,
-                    cursor: response.cursor,
-                };
-                Some((Ok(chunk), next.map(Some)))
-            }
-        })
-        .boxed();
+        let chunks = match &route.handler {
+            Handler::Stream(handler) => handler(state, base).await?,
+            Handler::Unary(_) => bail!("`{path}` is not a data-plane read"),
+        };
 
         Ok(DataStream { schema, chunks })
     }
@@ -858,6 +843,7 @@ impl<S: Send + Sync + 'static> Router<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::page::Cursor;
 
     #[test]
     fn matches_and_captures_params() {
