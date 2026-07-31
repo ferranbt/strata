@@ -29,10 +29,9 @@ mod convert;
 
 use convert::{align_to, iceberg_to_strata_schema, strata_to_iceberg_schema};
 
-use crate::dataset::Disposition;
 use crate::page::{Cursor, ListStrategy, Page};
 use crate::provider::Provider;
-use crate::record::{Batch, BatchPage, DataStream};
+use crate::record::{Batch, BatchPage, DataStream, Disposition};
 use crate::router::{Pages, Params, Route, Router};
 
 /// All strata tables live in one namespace.

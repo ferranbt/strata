@@ -21,9 +21,8 @@ use futures::StreamExt;
 use futures::stream::BoxStream;
 
 use crate::DataStream;
-use crate::dataset::Disposition;
 use crate::page::{ListStrategy, Page};
-use crate::record::{Batch, BatchPage};
+use crate::record::{Batch, BatchPage, Disposition};
 
 /// A boxed, owned future. `'static` because handlers take owned `Params` and an
 /// `Arc<S>`, so nothing is borrowed across the await.

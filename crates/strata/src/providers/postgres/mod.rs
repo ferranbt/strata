@@ -3,12 +3,11 @@ use schema::{DataType, Field, Schema};
 use serde_json::Value;
 use tokio_postgres::NoTls;
 
-use crate::dataset::Disposition;
-use crate::record::Batch;
 use crate::provider::Provider;
 use crate::providers::sql::{
     self, Filter, SqlCursor, SqlError, SqlSource, WriteResult, is_table_not_found,
 };
+use crate::record::{Batch, Disposition};
 use crate::router::Router;
 use config_macro::config;
 

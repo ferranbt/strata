@@ -5,10 +5,9 @@ use schema::{DataType, Field, Schema};
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::dataset::Disposition;
-use crate::record::Batch;
 use crate::provider::Provider;
 use crate::providers::sql::{self, Filter, SqlCursor, SqlError, SqlSource, WriteResult, quote_str};
+use crate::record::{Batch, Disposition};
 use crate::router::Router;
 
 #[config]

@@ -22,10 +22,9 @@ use schema::{DataType, HasSchema, Schema};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::dataset::Disposition;
 use crate::page::{Cursor, ListStrategy, Page};
 use crate::provider::Provider;
-use crate::record::{Batch, BatchPage, DataStream, stringify_text_columns};
+use crate::record::{Batch, BatchPage, DataStream, Disposition, stringify_text_columns};
 use crate::router::{Pages, Params, Route, Router};
 
 mod filter;
@@ -584,7 +583,9 @@ pub mod suite {
             id: 1,
             name: "a".into(),
         }];
-        let _: WriteResult = client.put("/tables/catalog", DataStream::of(&rows)?).await?;
+        let _: WriteResult = client
+            .put("/tables/catalog", DataStream::of(&rows)?)
+            .await?;
 
         let mut tables = client.list("/tables").await?;
         let names: Vec<TableName> = tables.next().await?;
@@ -736,7 +737,9 @@ pub mod suite {
                 name: "d".into(),
             },
         ];
-        let _: WriteResult = client.put("/tables/filtered", DataStream::of(&rows)?).await?;
+        let _: WriteResult = client
+            .put("/tables/filtered", DataStream::of(&rows)?)
+            .await?;
 
         let predicate = serde_json::json!({
             "and": [
@@ -778,7 +781,9 @@ pub mod suite {
                 name: "b".into(),
             },
         ];
-        let _: WriteResult = client.put("/tables/projected", DataStream::of(&rows)?).await?;
+        let _: WriteResult = client
+            .put("/tables/projected", DataStream::of(&rows)?)
+            .await?;
 
         let mut stream = client
             .list::<RowProjected>("/tables/projected?fields=name")

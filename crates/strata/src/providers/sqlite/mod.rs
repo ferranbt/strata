@@ -23,12 +23,11 @@ use serde_json::Value;
 use sqlx::Row as _;
 use sqlx::sqlite::{SqliteArguments, SqliteConnectOptions, SqlitePool};
 
-use crate::dataset::Disposition;
-use crate::record::Batch;
 use crate::provider::Provider;
 use crate::providers::sql::{
     self, Filter, SqlCursor, SqlError, SqlSource, WriteResult, is_table_not_found, quote_str,
 };
+use crate::record::{Batch, Disposition};
 use crate::router::Router;
 
 /// Bound parameters per statement. SQLite's own cap is 999 before 3.32 and higher
@@ -188,11 +187,7 @@ impl SqlSource for Sqlite {
             if !keys.is_empty() {
                 cols.push(format!("PRIMARY KEY ({})", quote_idents(&key_refs)));
             }
-            let ddl = format!(
-                "CREATE TABLE {} ({})",
-                quote_ident(table),
-                cols.join(", ")
-            );
+            let ddl = format!("CREATE TABLE {} ({})", quote_ident(table), cols.join(", "));
             sqlx::query(&ddl)
                 .execute(&pool)
                 .await
