@@ -441,7 +441,7 @@ mod tests {
 
         const ROWS: usize = 100;
         let generator = crate::datagen::Generator::new(&Event::schema())?;
-        let dataset = generator.dataset(ROWS)?;
+        let dataset = generator.stream(ROWS)?;
         let expected: Vec<Event> = dataset.records.decode(&dataset.schema)?;
 
         let result: WriteResult = c.put("/tables/events", dataset).await?;

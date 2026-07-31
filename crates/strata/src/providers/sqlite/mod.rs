@@ -23,7 +23,8 @@ use serde_json::Value;
 use sqlx::Row as _;
 use sqlx::sqlite::{SqliteArguments, SqliteConnectOptions, SqlitePool};
 
-use crate::dataset::{Dataset, Disposition};
+use crate::dataset::Disposition;
+use crate::record::Batch;
 use crate::provider::Provider;
 use crate::providers::sql::{
     self, Filter, SqlCursor, SqlError, SqlSource, WriteResult, is_table_not_found, quote_str,
@@ -213,11 +214,12 @@ impl SqlSource for Sqlite {
     async fn write_table(
         &self,
         table: &str,
-        data: Dataset,
+        schema: &Schema,
+        data: Batch,
         disposition: Disposition,
     ) -> Result<WriteResult> {
-        let fields = &data.schema.fields;
-        let keys = data.schema.get_key_fields();
+        let fields = &schema.fields;
+        let keys = schema.get_key_fields();
         let key_refs: Vec<&str> = keys.iter().map(String::as_str).collect();
         let ident = quote_ident(table);
         let pool = self.connect().await?;
@@ -255,7 +257,7 @@ impl SqlSource for Sqlite {
         };
         // Interim: decode the Arrow rows to JSON to bind positionally (Phase B binds
         // Arrow columns directly).
-        let rows = data.to_json_rows()?;
+        let rows = data.to_json_rows(schema)?;
 
         // One statement per chunk of rows rather than one per row, all inside a
         // single transaction — SQLite otherwise autocommits (and fsyncs) every insert.

@@ -11,8 +11,7 @@ use anyhow::Result;
 use schema::{DataType, Field, Schema};
 use serde_json::{Map, Value, json};
 
-use crate::dataset::Dataset;
-use crate::record::{Batch, stringify_text_columns};
+use crate::record::{Batch, DataStream, stringify_text_columns};
 
 pub struct Generator {
     schema: Schema,
@@ -48,9 +47,9 @@ impl Generator {
         Batch::encode(&self.schema, &rows)
     }
 
-    /// The first `n` rows as a [`Dataset`] (schema + Arrow records).
-    pub fn dataset(&self, n: usize) -> Result<Dataset> {
-        Ok(Dataset::new(self.schema.clone(), self.rows(0..n)?))
+    /// The first `n` rows as a single-page [`DataStream`], ready to `put`.
+    pub fn stream(&self, n: usize) -> Result<DataStream> {
+        Ok(DataStream::once(self.schema.clone(), self.rows(0..n)?))
     }
 }
 

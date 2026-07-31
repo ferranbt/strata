@@ -6,7 +6,7 @@ use arrow::record_batch::RecordBatch;
 use arrow_array::Array;
 use arrow_schema::Schema;
 use futures::stream::{BoxStream, StreamExt};
-use schema::{Annotations, DataType, Schema as StrataSchema};
+use schema::{Annotations, DataType, HasSchema, Schema as StrataSchema};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -21,6 +21,24 @@ pub struct DataStream {
 impl DataStream {
     pub async fn first(mut self) -> Result<Option<BatchPage>> {
         self.chunks.next().await.transpose()
+    }
+
+    /// A stream of exactly one page — the shape a caller that already has all the
+    /// rows in hand writes into a sink.
+    pub fn once(schema: StrataSchema, data: Batch) -> DataStream {
+        let page = BatchPage { data, cursor: None };
+        DataStream {
+            schema,
+            chunks: futures::stream::once(async move { Ok(page) }).boxed(),
+        }
+    }
+
+    /// One page built from typed `rows`: the schema is `T`'s, with whatever
+    /// `#[schema(key)]` annotations it declares, and the rows are encoded against it.
+    pub fn of<T: Serialize + HasSchema>(rows: &[T]) -> Result<DataStream> {
+        let schema = T::schema();
+        let data = Batch::encode(&schema, rows)?;
+        Ok(DataStream::once(schema, data))
     }
 }
 pub struct BatchPage {

@@ -5,7 +5,8 @@ use schema::{DataType, Field, Schema};
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::dataset::{Dataset, Disposition};
+use crate::dataset::Disposition;
+use crate::record::Batch;
 use crate::provider::Provider;
 use crate::providers::sql::{self, Filter, SqlCursor, SqlError, SqlSource, WriteResult, quote_str};
 use crate::router::Router;
@@ -197,10 +198,10 @@ impl SqlSource for Clickhouse {
     async fn write_table(
         &self,
         table: &str,
-        data: Dataset,
+        schema: &Schema,
+        data: Batch,
         _disposition: Disposition,
     ) -> Result<WriteResult> {
-        let schema = &data.schema;
         let ident = quote_ident(table);
 
         // Build a single `INSERT … FORMAT JSONEachRow` body: one JSON object per row,
@@ -209,7 +210,7 @@ impl SqlSource for Clickhouse {
         // ClickHouse's HTTP interface speaks JSONEachRow, so decode the Arrow rows to
         // JSON here — this is the one provider where JSON is the wire protocol, not an
         // interim bridge.
-        let rows = data.to_json_rows()?;
+        let rows = data.to_json_rows(schema)?;
         let mut rows_written = 0u64;
         if !rows.is_empty() {
             let mut body = format!("INSERT INTO {ident} FORMAT JSONEachRow\n");

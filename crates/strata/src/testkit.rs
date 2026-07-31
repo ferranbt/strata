@@ -14,7 +14,6 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use crate::dataset::Dataset;
 use crate::provider::Provider;
 use crate::record::DataStream;
 use crate::router::{Body, BoxFuture, Method, Response, Router, SchemaSource};
@@ -73,9 +72,9 @@ impl<S: Provider> Client<S> {
         Ok(serde_json::from_value(r.entity.unwrap_or(Value::Null))?)
     }
 
-    pub async fn put<T: DeserializeOwned>(&self, path: &str, data: Dataset) -> Result<T> {
+    pub async fn put<T: DeserializeOwned>(&self, path: &str, data: DataStream) -> Result<T> {
         let body = Body {
-            data: Some(data.into_stream()),
+            data: Some(data),
             meta: Value::Null,
         };
         let r = self.dispatch(Method::Put, path, Some(body)).await?;
