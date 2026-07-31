@@ -404,7 +404,7 @@ mod tests {
         rows: &[T],
     ) -> Result<()> {
         let body = crate::Body {
-            data: Some(crate::Dataset::of(rows)?.into_stream()),
+            data: Some(crate::DataStream::of(rows)?),
             meta: Value::Null,
         };
         registry

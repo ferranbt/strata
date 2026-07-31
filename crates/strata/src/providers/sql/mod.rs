@@ -22,10 +22,9 @@ use schema::{DataType, HasSchema, Schema};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::dataset::{Dataset, Disposition};
 use crate::page::{Cursor, ListStrategy, Page};
 use crate::provider::Provider;
-use crate::record::{Batch, BatchPage, DataStream, stringify_text_columns};
+use crate::record::{Batch, BatchPage, DataStream, Disposition, stringify_text_columns};
 use crate::router::{Pages, Params, Route, Router};
 
 mod filter;
@@ -214,7 +213,8 @@ pub trait SqlSource: Send + Sync + 'static {
     fn write_table(
         &self,
         table: &str,
-        data: Dataset,
+        schema: &Schema,
+        data: Batch,
         disposition: Disposition,
     ) -> impl Future<Output = Result<WriteResult>> + Send;
 
@@ -236,12 +236,8 @@ pub trait SqlSource: Send + Sync + 'static {
             };
             let mut rows_written = 0;
             while let Some(chunk) = chunks.next().await {
-                // TODO: We still create a dataset object, later on we should send
-                // the stream directly to the SQL provider but we would need a way for the provider
-                // to notify which batch has been written.
-                let dataset = Dataset::new(schema.clone(), chunk?.data);
                 rows_written += self
-                    .write_table(table, dataset, disposition)
+                    .write_table(table, &schema, chunk?.data, disposition)
                     .await?
                     .rows_written;
             }
@@ -552,8 +548,8 @@ fn next_cursor(cursor: &SqlCursor, returned: usize) -> Result<Cursor> {
 #[cfg(test)]
 pub mod suite {
     use super::{TableName, WriteResult};
-    use crate::dataset::Dataset;
     use crate::provider::Provider;
+    use crate::record::DataStream;
     use crate::testkit::Client;
     use anyhow::Result;
     use schema::{DataType, HasSchema};
@@ -587,7 +583,9 @@ pub mod suite {
             id: 1,
             name: "a".into(),
         }];
-        let _: WriteResult = client.put("/tables/catalog", Dataset::of(&rows)?).await?;
+        let _: WriteResult = client
+            .put("/tables/catalog", DataStream::of(&rows)?)
+            .await?;
 
         let mut tables = client.list("/tables").await?;
         let names: Vec<TableName> = tables.next().await?;
@@ -613,7 +611,7 @@ pub mod suite {
         client: &Client<S>,
     ) -> Result<()> {
         let generator = crate::datagen::Generator::new(&Event::schema())?;
-        let result: WriteResult = client.put("/tables/events", generator.dataset(20)?).await?;
+        let result: WriteResult = client.put("/tables/events", generator.stream(20)?).await?;
         assert!(result.created);
         assert_eq!(result.rows_written, 20);
 
@@ -631,7 +629,7 @@ pub mod suite {
 
         let generator = crate::datagen::Generator::new(&Event::schema())?;
         let result: WriteResult = client
-            .put("/tables/streamed", generator.dataset(ROWS)?)
+            .put("/tables/streamed", generator.stream(ROWS)?)
             .await?;
         assert_eq!(result.rows_written, ROWS as u64);
 
@@ -673,8 +671,8 @@ pub mod suite {
                 name: "b".into(),
             },
         ];
-        let _: WriteResult = client.put("/tables/dedup", Dataset::of(&rows)?).await?;
-        let _: WriteResult = client.put("/tables/dedup", Dataset::of(&rows)?).await?;
+        let _: WriteResult = client.put("/tables/dedup", DataStream::of(&rows)?).await?;
+        let _: WriteResult = client.put("/tables/dedup", DataStream::of(&rows)?).await?;
 
         let mut stream = client.list("/tables/dedup").await?;
         let found_rows: Vec<Row> = stream.next().await?;
@@ -692,7 +690,7 @@ pub mod suite {
         let _: WriteResult = client
             .put(
                 "/tables/up",
-                Dataset::of(&[Row {
+                DataStream::of(&[Row {
                     id: 1,
                     name: "a".into(),
                 }])?,
@@ -701,7 +699,7 @@ pub mod suite {
         let _: WriteResult = client
             .put(
                 "/tables/up?disposition=merge",
-                Dataset::of(&[Row {
+                DataStream::of(&[Row {
                     id: 1,
                     name: "b".into(),
                 }])?,
@@ -739,7 +737,9 @@ pub mod suite {
                 name: "d".into(),
             },
         ];
-        let _: WriteResult = client.put("/tables/filtered", Dataset::of(&rows)?).await?;
+        let _: WriteResult = client
+            .put("/tables/filtered", DataStream::of(&rows)?)
+            .await?;
 
         let predicate = serde_json::json!({
             "and": [
@@ -781,7 +781,9 @@ pub mod suite {
                 name: "b".into(),
             },
         ];
-        let _: WriteResult = client.put("/tables/projected", Dataset::of(&rows)?).await?;
+        let _: WriteResult = client
+            .put("/tables/projected", DataStream::of(&rows)?)
+            .await?;
 
         let mut stream = client
             .list::<RowProjected>("/tables/projected?fields=name")
@@ -819,7 +821,7 @@ pub mod suite {
                 name: "b".into(),
             },
         ];
-        let _: WriteResult = client.put("/tables/getone", Dataset::of(&rows)?).await?;
+        let _: WriteResult = client.put("/tables/getone", DataStream::of(&rows)?).await?;
 
         let row: Row = client.get("/tables/getone/2").await?;
         assert_eq!(row.id, 2);

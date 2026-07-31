@@ -3,11 +3,11 @@ use schema::{DataType, Field, Schema};
 use serde_json::Value;
 use tokio_postgres::NoTls;
 
-use crate::dataset::{Dataset, Disposition};
 use crate::provider::Provider;
 use crate::providers::sql::{
     self, Filter, SqlCursor, SqlError, SqlSource, WriteResult, is_table_not_found,
 };
+use crate::record::{Batch, Disposition};
 use crate::router::Router;
 use config_macro::config;
 
@@ -182,11 +182,12 @@ impl SqlSource for Postgres {
     async fn write_table(
         &self,
         table: &str,
-        data: Dataset,
+        schema: &Schema,
+        data: Batch,
         disposition: Disposition,
     ) -> Result<WriteResult> {
-        let fields = &data.schema.fields;
-        let keys = data.schema.get_key_fields();
+        let fields = &schema.fields;
+        let keys = schema.get_key_fields();
         let key_refs: Vec<&str> = keys.iter().map(String::as_str).collect();
         let ident = quote_ident(table);
         let client = self.connect().await?;
@@ -226,7 +227,7 @@ impl SqlSource for Postgres {
         );
         // Interim: decode the Arrow rows to JSON to bind as jsonb (Phase B binds
         // Arrow columns directly).
-        let rows = Value::Array(data.to_json_rows()?);
+        let rows = Value::Array(data.to_json_rows(schema)?);
         let rows_written = client
             .execute(&insert, &[&rows])
             .await

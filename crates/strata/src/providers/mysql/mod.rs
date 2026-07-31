@@ -5,11 +5,11 @@ use serde_json::Value;
 use sqlx::Row as _;
 use sqlx::mysql::{MySqlArguments, MySqlPool};
 
-use crate::dataset::{Dataset, Disposition};
 use crate::provider::Provider;
 use crate::providers::sql::{
     self, Filter, SqlCursor, SqlError, SqlSource, WriteResult, is_table_not_found, quote_str,
 };
+use crate::record::{Batch, Disposition};
 use crate::router::Router;
 
 /// Placeholders per statement. MySQL's protocol caps them at 65535; stay well
@@ -166,11 +166,7 @@ impl SqlSource for Mysql {
             if !keys.is_empty() {
                 cols.push(format!("PRIMARY KEY ({})", quote_idents(&key_refs)));
             }
-            let ddl = format!(
-                "CREATE TABLE {} ({})",
-                quote_ident(table),
-                cols.join(", ")
-            );
+            let ddl = format!("CREATE TABLE {} ({})", quote_ident(table), cols.join(", "));
             sqlx::query(&ddl)
                 .execute(&pool)
                 .await
@@ -192,11 +188,12 @@ impl SqlSource for Mysql {
     async fn write_table(
         &self,
         table: &str,
-        data: Dataset,
+        schema: &Schema,
+        data: Batch,
         disposition: Disposition,
     ) -> Result<WriteResult> {
-        let fields = &data.schema.fields;
-        let keys = data.schema.get_key_fields();
+        let fields = &schema.fields;
+        let keys = schema.get_key_fields();
         let key_refs: Vec<&str> = keys.iter().map(String::as_str).collect();
         let ident = quote_ident(table);
         let pool = self.connect().await?;
@@ -234,7 +231,7 @@ impl SqlSource for Mysql {
         };
         // Interim: decode the Arrow rows to JSON to bind positionally (Phase B binds
         // Arrow columns directly).
-        let rows = data.to_json_rows()?;
+        let rows = data.to_json_rows(schema)?;
 
         // One statement per chunk of rows rather than one per row, chunked by the
         // placeholder budget a single statement can carry.

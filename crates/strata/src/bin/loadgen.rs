@@ -14,7 +14,7 @@ use schema::{DataType, SchemaBuilder};
 use serde_json::Value;
 use strata::datagen::Generator;
 use strata::harness::{Plan, Stop, run};
-use strata::{Body, Dataset, Method};
+use strata::{Body, DataStream, Method};
 
 #[derive(Parser)]
 #[command(about = "Measure write throughput against a provider endpoint")]
@@ -80,7 +80,7 @@ async fn main() -> Result<()> {
             let start = offset as usize;
             let records = generator.rows(start..start + batch)?;
             let body = Body {
-                data: Some(Dataset::new(schema.clone(), records).into_stream()),
+                data: Some(DataStream::once(schema.clone(), records)),
                 meta: Value::Null,
             };
             let response = provider

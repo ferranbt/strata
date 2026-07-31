@@ -2,7 +2,7 @@
 //! resume cursor or a write disposition without hand-encoding `?cursor=` onto a path
 //! string. Each wraps a path and yields the encoded path via `.path()`.
 
-use crate::dataset::Disposition;
+use crate::record::Disposition;
 use crate::router::CURSOR_PARAM;
 
 /// A read path plus an optional resume `cursor`.
@@ -53,7 +53,11 @@ impl WriteRequest {
 
     /// The encoded path, with `?disposition=…` set to match the disposition.
     pub fn path(self) -> String {
-        set_param(&self.path, Disposition::PARAM, self.disposition.map(|d| d.as_param()))
+        set_param(
+            &self.path,
+            Disposition::PARAM,
+            self.disposition.map(|d| d.as_param()),
+        )
     }
 }
 

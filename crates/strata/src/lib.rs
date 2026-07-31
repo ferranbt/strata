@@ -4,7 +4,6 @@
 pub mod catalog;
 pub mod config;
 pub mod datagen;
-pub mod dataset;
 pub mod flight;
 pub mod graphql;
 pub mod harness;
@@ -25,10 +24,9 @@ use anyhow::Result;
 
 pub use catalog::Catalog;
 pub use config::{Config, ProviderConfig};
-pub use dataset::{Dataset, Disposition};
 pub use page::{Cursor, Page};
 pub use provider::{Provider, ProviderObject, Registry};
-pub use record::DataStream;
+pub use record::{DataStream, Disposition};
 pub use router::{Body, EndpointInfo, Method, Params, Response, Router};
 
 /// Config file consulted by [`registry`] when no explicit path is given.
