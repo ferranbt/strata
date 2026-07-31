@@ -8,6 +8,7 @@ pub mod dataset;
 pub mod flight;
 pub mod graphql;
 pub mod harness;
+pub mod mcp;
 pub mod page;
 pub mod pipe;
 pub mod provider;

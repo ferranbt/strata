@@ -82,6 +82,9 @@ enum Command {
         /// GraphQL HTTP address.
         #[arg(long, default_value = "127.0.0.1:8080")]
         graphql_addr: String,
+        /// MCP HTTP address.
+        #[arg(long, default_value = "127.0.0.1:8081")]
+        mcp_addr: String,
     },
 }
 
@@ -209,9 +212,14 @@ async fn run() -> Result<()> {
                 pipe.source.mount, pipe.source.path, pipe.destination.mount, pipe.destination.path
             );
         }
-        Command::Serve { addr, graphql_addr } => {
+        Command::Serve {
+            addr,
+            graphql_addr,
+            mcp_addr,
+        } => {
             let addr = addr.parse()?;
             let graphql_addr = graphql_addr.parse()?;
+            let mcp_addr = mcp_addr.parse()?;
 
             // Pipe subsystem: only spun up when pipes are declared, so `serve`
             // still runs without a catalog DB when there are none.
@@ -277,7 +285,8 @@ async fn run() -> Result<()> {
 
             tokio::try_join!(
                 strata::flight::serve(registry.clone(), addr),
-                strata::graphql::serve(registry, graphql_addr),
+                strata::graphql::serve(registry.clone(), graphql_addr),
+                strata::mcp::serve(registry, mcp_addr),
             )?;
         }
     }
