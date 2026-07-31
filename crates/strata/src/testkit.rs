@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use schema::Schema;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -110,12 +110,13 @@ impl<T: DeserializeOwned> ListConsumer<T> {
     }
 
     pub async fn next(&mut self) -> anyhow::Result<Vec<T>> {
-        self.data_stream
-            .chunks
-            .next()
-            .await
-            .expect("returned no page")?
-            .data
-            .decode::<T>(self.schema())
+        self.try_next().await?.ok_or_else(|| anyhow!("returned no page"))
+    }
+
+    pub async fn try_next(&mut self) -> anyhow::Result<Option<Vec<T>>> {
+        let Some(page) = self.data_stream.chunks.next().await.transpose()? else {
+            return Ok(None);
+        };
+        page.data.decode::<T>(self.schema()).map(Some)
     }
 }

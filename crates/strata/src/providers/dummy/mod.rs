@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
+use futures::StreamExt;
 use schema::Schema;
 use serde::{Deserialize, Serialize};
 
@@ -8,7 +9,7 @@ use crate::datagen::Generator;
 use crate::page::{Cursor, ListStrategy};
 use crate::provider::Provider;
 use crate::record::BatchPage;
-use crate::router::{Params, Route, Router};
+use crate::router::{Pages, Params, Route, Router};
 
 const DEFAULT_LIMIT: u32 = 100;
 const MAX_LIMIT: u32 = 1000;
@@ -31,7 +32,7 @@ impl Provider for Dummy {
         r.add(
             Route::new()
                 .path("/data")
-                .list_records(generate)
+                .list_stream(generate)
                 .data_type(types_schema)
                 .strategy(ListStrategy::Offset)
                 .description("Generated rows; `types` is a JSON DataType"),
@@ -56,30 +57,45 @@ async fn types_schema(_d: Arc<Dummy>, p: Params) -> Result<Schema> {
     types(&p)
 }
 
-/// One page of generated rows — a pure range of the generator, no state, no I/O.
-async fn generate(_d: Arc<Dummy>, p: Params) -> Result<BatchPage> {
-    let generator = Generator::new(&types(&p)?)?
-        .seed(p.query("seed").and_then(|v| v.parse().ok()).unwrap_or(0));
+/// Generated rows as a stream
+async fn generate(_d: Arc<Dummy>, p: Params) -> Result<Pages> {
+    let generator = Arc::new(
+        Generator::new(&types(&p)?)?
+            .seed(p.query("seed").and_then(|v| v.parse().ok()).unwrap_or(0)),
+    );
 
-    let cursor: DummyCursor = p.cursor()?;
     let limit = p.limit(DEFAULT_LIMIT, MAX_LIMIT);
     let total = p
         .query("rows")
         .and_then(|v| v.parse().ok())
         .unwrap_or(DEFAULT_ROWS)
         .min(MAX_ROWS);
+    let start: DummyCursor = p.cursor()?;
 
-    let start = cursor.offset.min(total);
-    let end = start.saturating_add(limit).min(total);
+    let pages = futures::stream::unfold(Some(start.offset.min(total)), move |offset| {
+        let generator = generator.clone();
+        async move {
+            let start = offset?;
+            let end = start.saturating_add(limit).min(total);
+            let page = generate_page(&generator, start, end, total);
+            match page {
+                Ok(page) => Some((Ok(page), (end < total).then_some(end))),
+                Err(e) => Some((Err(e), None)),
+            }
+        }
+    });
+    Ok(pages.boxed())
+}
+
+fn generate_page(generator: &Generator, start: u32, end: u32, total: u32) -> Result<BatchPage> {
     let data = generator.rows(start as usize..end as usize)?;
-
-    let next = if end < total {
+    let cursor = if end < total {
         Cursor::new(&DummyCursor { offset: end })?
     } else {
         Cursor::empty()
     };
     Ok(BatchPage {
         data,
-        cursor: Some(next),
+        cursor: Some(cursor),
     })
 }
