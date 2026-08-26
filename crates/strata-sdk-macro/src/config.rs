@@ -45,8 +45,7 @@ use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{Attribute, Fields, ItemStruct, LitStr, parse_macro_input};
 
-#[proc_macro_attribute]
-pub fn config(_attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn attribute(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut item = parse_macro_input!(item as ItemStruct);
     let name = item.ident.clone();
 

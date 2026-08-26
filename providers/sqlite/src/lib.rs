@@ -17,7 +17,7 @@
 //! schema of `/tables/:table/data` is still resolved dynamically from the catalog.
 
 use anyhow::{Context, Result, bail};
-use config_macro::config;
+use strata_sdk::config;
 use schema::{DataType, Field, Schema};
 use serde_json::Value;
 use sqlx::Row as _;

@@ -8,7 +8,7 @@ use serde_json::Value;
 use tokio::sync::Mutex;
 
 use arrow_array::RecordBatch;
-use config_macro::config;
+use strata_sdk::config;
 use futures::{StreamExt, TryStreamExt};
 use iceberg::transaction::{ApplyTransactionAction, Transaction};
 use iceberg::writer::base_writer::data_file_writer::DataFileWriterBuilder;

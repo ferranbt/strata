@@ -9,7 +9,7 @@ use strata_sdk::sql::{
 };
 use strata_sdk::record::{Batch, Disposition};
 use strata_sdk::router::Router;
-use config_macro::config;
+use strata_sdk::config;
 
 pub struct Postgres {
     config: Config,

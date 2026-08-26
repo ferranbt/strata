@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use config_macro::config;
+use strata_sdk::config;
 use http_client::{HttpClient, OAuth2};
 use schema::HasSchema;
 use serde::de::DeserializeOwned;

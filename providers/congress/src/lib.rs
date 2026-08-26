@@ -2,7 +2,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
-use config_macro::config;
+use strata_sdk::config;
 use schema::{Date, HasSchema, Timestamp};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};

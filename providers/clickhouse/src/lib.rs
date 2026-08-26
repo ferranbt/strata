@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, anyhow, bail};
-use config_macro::config;
+use strata_sdk::config;
 use http_client::HttpClient;
 use schema::{DataType, Field, Schema};
 use serde::Deserialize;

@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, HashMap};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
-pub use schema_macro::HasSchema;
+pub use strata_sdk_macro::HasSchema;
 
 mod temporal;
 pub use temporal::{Date, Timestamp};

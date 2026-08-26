@@ -1,7 +1,7 @@
 //! End-to-end tests for `#[config]`: they exercise the attribute on real structs
 //! and observe behavior, rather than asserting on generated tokens.
 
-use config_macro::config;
+use strata_sdk_macro::config;
 
 mod test {
     use super::*;

@@ -3,8 +3,7 @@ resolver = "2"
 members = [
     "crates/strata",
     "crates/schema",
-    "crates/schema-macro",
-    "crates/config-macro",
+    "crates/strata-sdk-macro",
     "crates/database",
     "crates/strata-types",
     "crates/strata-proto",
@@ -29,8 +28,7 @@ default-members = ["crates/strata"]
 
 [workspace.dependencies]
 schema = { path = "crates/schema" }
-schema-macro = { path = "crates/schema-macro" }
-config-macro = { path = "crates/config-macro" }
+strata-sdk-macro = { path = "crates/strata-sdk-macro" }
 strata-types = { path = "crates/strata-types" }
 strata-proto = { path = "crates/strata-proto" }
 strata-sdk = { path = "crates/strata-sdk" }

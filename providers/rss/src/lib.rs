@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
-use config_macro::config;
+use strata_sdk::config;
 use schema::{HasSchema, Timestamp};
 use serde::{Deserialize, Serialize};
 

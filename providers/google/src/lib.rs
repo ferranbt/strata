@@ -10,7 +10,7 @@ mod drive;
 mod gmail;
 
 use anyhow::Result;
-use config_macro::config;
+use strata_sdk::config;
 use http_client::{HttpClient, OAuth2};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};

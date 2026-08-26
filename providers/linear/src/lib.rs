@@ -4,7 +4,7 @@ use strata_sdk::{
     Cursor, Page, Params, Provider, ProviderConfig, Router, page::ListStrategy, router::Route,
 };
 use anyhow::{Result, anyhow};
-use config_macro::config;
+use strata_sdk::config;
 use http::header::{AUTHORIZATION, CONTENT_TYPE};
 use schema::{HasSchema, Timestamp};
 use serde::de::DeserializeOwned;
