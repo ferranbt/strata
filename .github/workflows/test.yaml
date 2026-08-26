@@ -19,6 +19,7 @@ jobs:
           components: rustfmt, clippy
 
       - uses: taiki-e/install-action@just
+      - uses: taiki-e/install-action@protoc
 
       - name: Run lint checks
         run: just lint
@@ -31,6 +32,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@protoc
 
       - name: Run tests
         run: cargo test --workspace

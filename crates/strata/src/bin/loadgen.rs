@@ -59,8 +59,8 @@ async fn main() -> Result<()> {
     };
 
     let registry = match &cli.config {
-        Some(path) => strata::registry_from_config(path)?,
-        None => strata::registry()?,
+        Some(path) => strata::registry_from_config(path).await?,
+        None => strata::registry().await?,
     };
     let provider = registry.get(&cli.mount)?;
 
