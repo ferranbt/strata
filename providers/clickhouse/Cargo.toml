@@ -1,0 +1,21 @@
+[package]
+name = "strata-clickhouse"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+schema.workspace = true
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+strata-sdk.workspace = true
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
+config-macro.workspace = true
+http-client.workspace = true
+
+[[bin]]
+name = "strata-clickhouse"
+path = "cmd/main.rs"
+
+[dev-dependencies]
+dockertest.workspace = true

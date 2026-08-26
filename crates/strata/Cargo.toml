@@ -45,64 +45,22 @@ async-graphql = { version = "7", features = ["dynamic-schema"] }
 async-graphql-axum = "7"
 axum = "0.8"
 rmcp = { version = "2.2.0", features = ["server", "macros", "transport-streamable-http-server", "server-side-http"] }
-strata-proto = { version = "0.1.0", path = "../strata-proto" }
+strata-proto.workspace = true
 tokio-stream = { version = "0.1.19", features = ["net"] }
-
-[[bin]]
-name = "strata-clickhouse"
-path = "src/providers/clickhouse/cmd/main.rs"
-
-[[bin]]
-name = "strata-congress"
-path = "src/providers/congress/cmd/main.rs"
-
-[[bin]]
-name = "strata-dummy"
-path = "src/providers/dummy/cmd/main.rs"
-
-[[bin]]
-name = "strata-fs"
-path = "src/providers/fs/cmd/main.rs"
-
-[[bin]]
-name = "strata-github"
-path = "src/providers/github/cmd/main.rs"
-
-[[bin]]
-name = "strata-google"
-path = "src/providers/google/cmd/main.rs"
-
-[[bin]]
-name = "strata-iceberg"
-path = "src/providers/iceberg/cmd/main.rs"
-
-[[bin]]
-name = "strata-linear"
-path = "src/providers/linear/cmd/main.rs"
-
-[[bin]]
-name = "strata-mysql"
-path = "src/providers/mysql/cmd/main.rs"
-
-[[bin]]
-name = "strata-postgres"
-path = "src/providers/postgres/cmd/main.rs"
-
-[[bin]]
-name = "strata-rss"
-path = "src/providers/rss/cmd/main.rs"
-
-[[bin]]
-name = "strata-spotify"
-path = "src/providers/spotify/cmd/main.rs"
-
-[[bin]]
-name = "strata-sqlite"
-path = "src/providers/sqlite/cmd/main.rs"
-
-[[bin]]
-name = "strata-substack"
-path = "src/providers/substack/cmd/main.rs"
+strata-sdk.workspace = true
+strata-clickhouse.workspace = true
+strata-congress.workspace = true
+strata-fs.workspace = true
+strata-github.workspace = true
+strata-google.workspace = true
+strata-iceberg.workspace = true
+strata-linear.workspace = true
+strata-mysql.workspace = true
+strata-postgres.workspace = true
+strata-rss.workspace = true
+strata-spotify.workspace = true
+strata-sqlite.workspace = true
+strata-substack.workspace = true
 
 [dev-dependencies]
-dockertest = { path = "../dockertest" }
+dockertest.workspace = true

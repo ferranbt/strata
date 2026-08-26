@@ -236,7 +236,10 @@ async fn run() -> Result<()> {
             } else {
                 let db =
                     database::Database::new(std::env::var("DATABASE_URL").ok().as_deref()).await?;
-                registry.set_catalog(db.clone());
+                for mount in registry.mounts() {
+                    let catalog = strata::Catalog::new(db.clone(), mount.clone());
+                    registry.set_schema_source(&mount, std::sync::Arc::new(catalog))?;
+                }
                 Some(db)
             };
             let registry = std::sync::Arc::new(registry);

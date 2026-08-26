@@ -8,8 +8,22 @@ members = [
     "crates/database",
     "crates/strata-types",
     "crates/strata-proto",
+    "crates/strata-sdk",
     "crates/http-client",
-    "crates/dockertest"
+    "crates/dockertest",
+    "providers/clickhouse",
+    "providers/congress",
+    "providers/fs",
+    "providers/github",
+    "providers/google",
+    "providers/iceberg",
+    "providers/linear",
+    "providers/mysql",
+    "providers/postgres",
+    "providers/rss",
+    "providers/spotify",
+    "providers/substack",
+    "providers/sqlite"
 ]
 default-members = ["crates/strata"]
 
@@ -19,6 +33,21 @@ schema-macro = { path = "crates/schema-macro" }
 config-macro = { path = "crates/config-macro" }
 strata-types = { path = "crates/strata-types" }
 strata-proto = { path = "crates/strata-proto" }
+strata-sdk = { path = "crates/strata-sdk" }
+strata-clickhouse = { path = "providers/clickhouse" }
+strata-congress = { path = "providers/congress" }
+strata-fs = { path = "providers/fs" }
+strata-github = { path = "providers/github" }
+strata-google = { path = "providers/google" }
+strata-iceberg = { path = "providers/iceberg" }
+strata-linear = { path = "providers/linear" }
+strata-mysql = { path = "providers/mysql" }
+strata-postgres = { path = "providers/postgres" }
+strata-rss = { path = "providers/rss" }
+strata-spotify = { path = "providers/spotify" }
+strata-substack = { path = "providers/substack" }
+strata-sqlite = { path = "providers/sqlite" }
 database = { path = "crates/database" }
 http-client = { path = "crates/http-client" }
+dockertest = { path = "crates/dockertest" }
 http = "1"

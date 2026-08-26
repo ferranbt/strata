@@ -1,0 +1,25 @@
+[package]
+name = "strata-sdk"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+arrow = "58"
+arrow-array = "58"
+arrow-schema = "58"
+chrono = "0.4"
+clap = { version = "4", features = ["derive"] }
+futures = "0.3"
+schema.workspace = true
+serde = { version = "1", features = ["derive"] }
+serde_arrow = { version = "0.14.2", features = ["arrow-58"] }
+serde_json = "1"
+serde_urlencoded = "0.7"
+strata-proto.workspace = true
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "process", "io-util", "time"] }
+tokio-stream = { version = "0.1.19", features = ["net"] }
+tonic = { version = "0.14", features = ["transport"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+urlencoding = "2"
