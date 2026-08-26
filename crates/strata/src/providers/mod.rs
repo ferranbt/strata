@@ -11,7 +11,7 @@ pub mod linear;
 pub mod mysql;
 pub mod postgres;
 pub mod rss;
-pub mod sql;
 pub mod spotify;
+pub mod sql;
 pub mod sqlite;
 pub mod substack;

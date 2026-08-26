@@ -1,0 +1,12 @@
+[package]
+name = "strata-proto"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+prost = "0.14"
+tonic = { version = "0.14", features = ["transport"] }
+tonic-prost = "0.14"
+
+[build-dependencies]
+tonic-prost-build = "0.14"

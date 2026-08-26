@@ -8,6 +8,7 @@ pub mod flight;
 pub mod graphql;
 pub mod harness;
 pub mod mcp;
+pub mod plugin;
 pub mod page;
 pub mod pipe;
 pub mod provider;
@@ -53,9 +54,9 @@ pub const BACKENDS: &[&str] = &[
 
 /// Build the registry: from `strata.toml` if present, else every backend mounted
 /// at its default mount point (its name).
-pub fn registry() -> Result<Registry> {
+pub async fn registry() -> Result<Registry> {
     if Path::new(DEFAULT_CONFIG).exists() {
-        registry_from_config(DEFAULT_CONFIG)
+        registry_from_config(DEFAULT_CONFIG).await
     } else {
         registry_default()
     }
@@ -77,13 +78,36 @@ pub fn config_path(explicit: Option<&str>) -> Option<String> {
 /// Build the registry from a config file (errors if missing/malformed). Each
 /// `[provider.<name>]` is mounted: `backend` selects the type (default: the
 /// table name), `mount` the router location (default: the table name).
-pub fn registry_from_config(path: impl AsRef<Path>) -> Result<Registry> {
+///
+/// An instance that declares `endpoint` is served by another process: strata
+/// connects, mounts it with the same settings over the protocol, and holds it
+/// behind the same [`ProviderObject`] as a built-in.
+pub async fn registry_from_config(path: impl AsRef<Path>) -> Result<Registry> {
     let config = Config::load(path)?;
+    let catalog_dir = plugin::catalog::dir();
     let mut registry = Registry::new();
     for settings in config.providers() {
-        let backend = settings.backend.clone();
         let mount = settings.mount.clone();
-        mount_backend(&mut registry, backend.as_str(), mount.as_str(), settings)?;
+        let backend = settings.backend.clone();
+        match (
+            settings.param("endpoint"),
+            plugin::catalog::binary(&catalog_dir, &backend),
+        ) {
+            (Some(endpoint), _) => {
+                let remote = plugin::connect(&mount, endpoint, settings).await?;
+                registry.mount_object(&mount, Box::new(remote))?;
+            }
+            (None, Some(binary)) => {
+                let (process, handshake) = plugin::catalog::spawn(&binary).await?;
+                let remote = plugin::connect(&mount, &handshake.endpoint()?, settings)
+                    .await?
+                    .owning(process);
+                registry.mount_object(&mount, Box::new(remote))?;
+            }
+            (None, None) => {
+                mount_backend(&mut registry, backend.as_str(), mount.as_str(), settings)?;
+            }
+        }
     }
     mount_dummy(&mut registry)?;
     Ok(registry)

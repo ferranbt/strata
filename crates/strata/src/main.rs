@@ -117,8 +117,8 @@ async fn run() -> Result<()> {
     let cli = Cli::parse();
     // Explicit `--config` wins; otherwise fall back to `strata.toml`-or-all.
     let registry = match &cli.config {
-        Some(path) => strata::registry_from_config(path)?,
-        None => strata::registry()?,
+        Some(path) => strata::registry_from_config(path).await?,
+        None => strata::registry().await?,
     };
 
     match cli.command {

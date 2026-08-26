@@ -1,0 +1,93 @@
+syntax = "proto3";
+
+package strata.provider.v1;
+
+service Provider {
+  rpc Mount(MountRequest) returns (MountResponse);
+  rpc Endpoints(EndpointsRequest) returns (EndpointsResponse);
+  rpc Read(ReadRequest) returns (stream ReadResponse);
+  rpc Write(stream WriteRequest) returns (WriteResponse);
+  rpc Invoke(InvokeRequest) returns (InvokeResponse);
+}
+
+enum Method {
+  METHOD_UNSPECIFIED = 0;
+  METHOD_GET = 1;
+  METHOD_LIST = 2;
+  METHOD_CREATE = 3;
+  METHOD_PUT = 4;
+}
+
+message EndpointInfo {
+  Method method = 1;
+  string path = 2;
+  optional string description = 3;
+  repeated string params = 4;
+  string body_schema = 5;
+  string response_schema = 6;
+  map<string, string> metadata = 7;
+}
+
+message MountRequest {
+  map<string, string> config = 1;
+}
+
+message MountResponse {
+  string name = 1;
+}
+
+message EndpointsRequest {
+  optional string path = 1;
+}
+
+message EndpointsResponse {
+  repeated EndpointInfo endpoints = 1;
+}
+
+message Cursor {
+  optional string next = 1;
+  optional uint32 total = 2;
+}
+
+message Page {
+  bytes arrow_ipc = 1;
+  optional Cursor cursor = 2;
+}
+
+message ReadRequest {
+  string path = 1;
+}
+
+message ReadResponse {
+  oneof message {
+    string schema = 1;
+    Page page = 2;
+  }
+}
+
+message WriteStart {
+  string path = 1;
+  string schema = 2;
+}
+
+message WriteRequest {
+  oneof message {
+    WriteStart start = 1;
+    Page page = 2;
+  }
+}
+
+message WriteResponse {
+  string output = 1;
+}
+
+message InvokeRequest {
+  Method method = 1;
+  string path = 2;
+  optional string meta = 3;
+}
+
+message InvokeResponse {
+  optional string entity = 1;
+  string output = 2;
+}

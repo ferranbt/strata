@@ -132,6 +132,16 @@ impl Registry {
         Ok(())
     }
 
+    /// Mount an already-built provider — the seam an out-of-process one comes in
+    /// through, since it has nothing to construct from a [`ProviderConfig`].
+    pub fn mount_object(&mut self, mount: &str, provider: Box<dyn ProviderObject>) -> Result<()> {
+        if self.providers.contains_key(mount) {
+            bail!("mount point `{mount}` is already in use");
+        }
+        self.providers.insert(mount.to_string(), provider);
+        Ok(())
+    }
+
     pub fn set_catalog(&mut self, db: database::Database) {
         for (mount, provider) in self.providers.iter_mut() {
             provider.set_schema_source(Arc::new(Catalog::new(db.clone(), mount.clone())));
