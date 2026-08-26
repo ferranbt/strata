@@ -154,6 +154,7 @@ mod tests {
         unsafe { std::env::remove_var("STRATA_TEST_PORT") };
         let settings =
             Settings::from_config(&config(serde_json::json!({ "key": "k" }))).expect("resolves");
+        assert_eq!(settings.key, "k");
         assert_eq!(settings.port, 8123);
 
         let settings = Settings::from_config(&config(
