@@ -23,7 +23,6 @@ use serde_json::Value;
 use sqlx::Row as _;
 use sqlx::sqlite::{SqliteArguments, SqliteConnectOptions, SqlitePool};
 
-use strata_sdk::provider::Provider;
 use strata_sdk::sql::{
     self, Filter, SqlCursor, SqlError, SqlSource, WriteResult, is_table_not_found, quote_str,
 };
@@ -36,37 +35,32 @@ const MAX_BIND_PARAMS: usize = 999;
 
 #[config]
 struct Config {
+    #[config(description = "Path to the database file, created if missing")]
     path: String,
 }
 
 /// Provider state: the database file path for this instance. Each call opens its
 /// own connection, so several mounts can target different files.
+#[derive(strata_sdk::Provider)]
+#[config(Config)]
 pub struct Sqlite {
     config: Config,
     /// Built once and reused — a fresh pool per call costs more than the writes.
     pool: tokio::sync::OnceCell<SqlitePool>,
 }
 
-impl Provider for Sqlite {
-    fn name() -> &'static str {
-        "sqlite"
-    }
-
-    fn new(config: &strata_sdk::config::ProviderConfig) -> Result<Self> {
-        // The DB file from config (`path`). Optional so the provider still
-        // registers without it; calls then error clearly.
+impl Sqlite {
+    fn new(config: Config) -> Result<Self> {
         Ok(Sqlite {
-            config: config.decode()?,
+            config,
             pool: tokio::sync::OnceCell::new(),
         })
     }
 
-    fn register(r: &mut Router<Self>) {
+    fn routes(r: &mut Router<Self>) {
         Self::register_tables(r);
     }
-}
 
-impl Sqlite {
     /// The connection pool for this instance's file, opened on first use and
     /// creating the file if missing.
     async fn connect(&self) -> Result<SqlitePool> {

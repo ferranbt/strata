@@ -30,7 +30,6 @@ mod convert;
 use convert::{align_to, iceberg_to_strata_schema, strata_to_iceberg_schema};
 
 use strata_sdk::page::{Cursor, ListStrategy, Page};
-use strata_sdk::provider::Provider;
 use strata_sdk::record::{Batch, BatchPage, DataStream, Disposition};
 use strata_sdk::router::{Pages, Params, Route, Router};
 
@@ -51,11 +50,17 @@ struct IcebergCursor {
 
 #[config]
 struct Config {
-    #[config(default_env = "STRATA_WAREHOUSE")]
+    #[config(
+        env = "STRATA_WAREHOUSE",
+        default = "./warehouse",
+        description = "Warehouse directory holding tables and the catalog DB"
+    )]
     warehouse: String,
 }
 
 /// Provider state: warehouse/catalog locations plus the lazily-built catalog.
+#[derive(strata_sdk::Provider)]
+#[config(Config)]
 pub struct Iceberg {
     /// `file://` URI of the warehouse (FileIO root).
     warehouse: String,
@@ -66,22 +71,10 @@ pub struct Iceberg {
     catalog: Mutex<Option<Arc<dyn Catalog>>>,
 }
 
-impl Provider for Iceberg {
-    fn name() -> &'static str {
-        "iceberg"
-    }
-
-    fn new(config: &strata_sdk::config::ProviderConfig) -> Result<Self> {
-        // Warehouse from config (`warehouse`) or `STRATA_WAREHOUSE`, default
-        // `./warehouse`. Each mounted instance can point at its own warehouse.
-        let config: Config = config.decode()?;
-        // Neither the `warehouse` config key nor `STRATA_WAREHOUSE` set → `./warehouse`
-        // (not the current directory, which silently scattered tables into the repo).
-        let dir = if config.warehouse.is_empty() {
-            "./warehouse".to_string()
-        } else {
-            config.warehouse
-        };
+impl Iceberg {
+    fn new(config: Config) -> Result<Self> {
+        // Each mounted instance can point at its own warehouse.
+        let dir = config.warehouse;
         let abs = if std::path::Path::new(&dir).is_absolute() {
             std::path::PathBuf::from(&dir)
         } else {
@@ -96,7 +89,7 @@ impl Provider for Iceberg {
         })
     }
 
-    fn register(r: &mut Router<Self>) {
+    fn routes(r: &mut Router<Self>) {
         r.add(
             Route::new()
                 .path("/tables")
@@ -115,9 +108,7 @@ impl Provider for Iceberg {
                 .strategy(ListStrategy::Offset),
         );
     }
-}
 
-impl Iceberg {
     /// Build (once) and return the SQLite-backed catalog.
     async fn catalog(&self) -> Result<Arc<dyn Catalog>> {
         let mut guard = self.catalog.lock().await;

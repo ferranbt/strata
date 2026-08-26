@@ -3,7 +3,6 @@ use schema::{DataType, Field, Schema};
 use serde_json::Value;
 use tokio_postgres::NoTls;
 
-use strata_sdk::provider::Provider;
 use strata_sdk::sql::{
     self, Filter, SqlCursor, SqlError, SqlSource, WriteResult, is_table_not_found,
 };
@@ -11,33 +10,27 @@ use strata_sdk::record::{Batch, Disposition};
 use strata_sdk::router::Router;
 use strata_sdk::config;
 
+#[derive(strata_sdk::Provider)]
+#[config(Config)]
 pub struct Postgres {
     config: Config,
 }
 
 #[config]
 struct Config {
-    #[config(default_env = "DATABASE_URL")]
+    #[config(env = "DATABASE_URL", description = "postgres:// connection URL", secret)]
     url: String,
 }
 
-impl Provider for Postgres {
-    fn name() -> &'static str {
-        "postgres"
+impl Postgres {
+    fn new(config: Config) -> Result<Self> {
+        Ok(Postgres { config })
     }
 
-    fn new(config: &strata_sdk::config::ProviderConfig) -> Result<Self> {
-        Ok(Postgres {
-            config: config.decode()?,
-        })
-    }
-
-    fn register(r: &mut Router<Self>) {
+    fn routes(r: &mut Router<Self>) {
         Self::register_tables(r);
     }
-}
 
-impl Postgres {
     async fn connect(&self) -> Result<tokio_postgres::Client> {
         let url = &self.config.url;
         let (client, connection) = tokio_postgres::connect(url, NoTls)

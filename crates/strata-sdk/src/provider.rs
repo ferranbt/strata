@@ -22,6 +22,11 @@ pub trait Provider: Sized + Send + Sync + 'static {
     /// select the backend from config.
     fn name() -> &'static str;
 
+    /// The settings this provider takes, for a host to report before mounting.
+    fn config_schema() -> schema::Schema {
+        schema::Schema::empty()
+    }
+
     /// Construct provider state (build HTTP clients, read credentials, etc.) from
     /// the instance's [`ProviderConfig`], falling back to env vars as needed.
     fn new(config: &ProviderConfig) -> Result<Self>;

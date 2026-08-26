@@ -1,49 +1,36 @@
-//! `#[config]` — a small provider-config helper on top of serde.
+//! `#[config]` — describe and resolve a provider's settings.
 //!
-//! Put it above a config struct and it rewrites the struct so that, for every
-//! field carrying `#[config(default_env = "ENV")]`, a missing key is filled from
-//! the environment variable `ENV` during deserialization. You write nothing else:
-//! no `#[derive(Deserialize)]`, no `#[serde(default = "…")]`.
+//! Each field is read from the provider's config key, else from the environment
+//! variable named by `env`, else from a declared `default`. A field satisfied by
+//! none of those is an error naming the sources, unless it is `Option<_>`.
 //!
 //! ```ignore
 //! #[config]
 //! struct Config {
-//!     #[config(default_env = "CLICKHOUSE_URL")]
-//!     url: String,
-//!     #[config(default_env = "CLICKHOUSE_USER")]
-//!     user: String,
+//!     #[config(env = "GITHUB_TOKEN", description = "API token", secret)]
+//!     api_key: String,
+//!     #[config(default = "./warehouse")]
+//!     warehouse: String,
+//!     region: Option<String>,
 //! }
 //! ```
 //!
-//! expands (roughly) to:
-//!
-//! ```ignore
-//! #[derive(serde::Deserialize)]
-//! struct Config {
-//!     #[serde(default = "Config::default_url")]
-//!     url: String,
-//!     #[serde(default = "Config::default_user")]
-//!     user: String,
-//! }
-//! impl Config {
-//!     fn default_url() -> String { std::env::var("CLICKHOUSE_URL").…unwrap_or_default() }
-//!     fn default_user() -> String { std::env::var("CLICKHOUSE_USER").…unwrap_or_default() }
-//! }
-//! // when *every* field is env-defaulted, also:
-//! impl Default for Config { fn default() -> Self { serde_json::from_str("{}")… } }
-//! ```
-//!
-//! The env-backed default reads the variable, parses it into the field type, and
-//! falls back to the type's `Default` when the variable is unset or unparsable.
-//!
-//! Requirements on the using crate: `serde` (with `derive`) and `serde_json` in
-//! scope as `::serde` / `::serde_json`. The generated `default_*` functions are
-//! associated to the struct, so several config structs may live in one module
-//! without their defaults colliding.
+//! generates `ConfigSchema` for the struct: `config_schema()` describing the
+//! fields (each annotated with its `env` name and whether it is `secret`), and
+//! `from_config()` resolving them.
 
 use proc_macro::TokenStream;
-use quote::{format_ident, quote};
+use quote::quote;
 use syn::{Attribute, Fields, ItemStruct, LitStr, parse_macro_input};
+
+use crate::serde_attrs;
+
+struct Setting {
+    env: Option<String>,
+    default: Option<String>,
+    description: Option<String>,
+    secret: bool,
+}
 
 pub fn attribute(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut item = parse_macro_input!(item as ItemStruct);
@@ -58,80 +45,124 @@ pub fn attribute(_attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
 
-    // Rewrite each field: pull its `#[config(default_env = "ENV")]` (if any) and
-    // replace it with a `#[serde(default = "Name::default_<field>")]` pointing at
-    // a generated associated fn. Fields without it stay required.
-    let mut default_fns = Vec::new();
-    let mut all_env_defaulted = !fields.is_empty();
+    let mut described = Vec::new();
+    let mut resolved = Vec::new();
     for field in fields.iter_mut() {
         let ident = field.ident.clone().unwrap();
-        let ty = field.ty.clone();
-
-        let env = take_default_env(&mut field.attrs);
-        let Some(env) = env else {
-            all_env_defaulted = false;
-            continue;
+        let key = ident.to_string();
+        let setting = match take_setting(&mut field.attrs) {
+            Ok(setting) => setting,
+            Err(e) => return e.to_compile_error().into(),
         };
 
-        let fn_name = format_ident!("default_{}", ident);
-        let default_path = format!("{name}::{fn_name}");
-        let serde_default: Attribute = syn::parse_quote!(#[serde(default = #default_path)]);
-        field.attrs.push(serde_default);
+        let (ty, optional) = match serde_attrs::option_inner(&field.ty) {
+            Some(inner) => (inner.clone(), true),
+            None => (field.ty.clone(), false),
+        };
+        // A field with a default is always satisfiable, so it is not required —
+        // but it still resolves to a value, so only an `Option<_>` field keeps
+        // the `Option`.
+        let required = !optional && setting.default.is_none();
+        let nullable = optional || setting.default.is_some();
 
-        default_fns.push(quote! {
-            #[doc(hidden)]
-            fn #fn_name() -> #ty {
-                ::std::env::var(#env)
-                    .ok()
-                    .and_then(|value| value.parse().ok())
-                    .unwrap_or_default()
+        let env = option_str(&setting.env);
+        let default = option_str(&setting.default);
+        let annotations = [
+            setting.env.map(|env| quote! { field.annotate("env", #env); }),
+            setting
+                .default
+                .map(|value| quote! { field.annotate("default", #value); }),
+            setting
+                .secret
+                .then(|| quote! { field.annotate("secret", "true"); }),
+            setting
+                .description
+                .map(|text| quote! { field = field.with_description(#text); }),
+        ];
+        described.push(quote! {
+            {
+                let mut field = ::schema::Field::new(
+                    #key,
+                    <#ty as ::schema::HasDataType>::data_type(),
+                    #nullable,
+                );
+                #(#annotations)*
+                field
             }
         });
+
+        let call = quote! {
+            ::strata_sdk::config::resolve::<#ty>(
+                config, #key, #env, #default, #required,
+            )?
+        };
+        let value = match optional {
+            true => call,
+            false => quote! { #call.expect("a required or defaulted setting resolves") },
+        };
+        resolved.push(quote! { #ident: #value });
     }
 
-    // A `Default` via empty-object decode only makes sense if every field has an
-    // env-backed default; otherwise the decode would fail on a required field.
-    let default_impl = if all_env_defaulted {
-        quote! {
-            impl ::std::default::Default for #name {
-                fn default() -> Self {
-                    ::serde_json::from_str("{}")
-                        .expect("#[config] default requires every field to be env-defaulted")
-                }
-            }
-        }
-    } else {
-        quote! {}
-    };
-
     quote! {
-        #[derive(::serde::Deserialize)]
         #item
 
-        impl #name {
-            #(#default_fns)*
-        }
+        impl ::strata_sdk::config::ConfigSchema for #name {
+            fn config_schema() -> ::schema::Schema {
+                ::schema::Schema::new(::std::vec![ #(#described),* ])
+            }
 
-        #default_impl
+            fn from_config(
+                config: &::strata_sdk::config::ProviderConfig,
+            ) -> ::anyhow::Result<Self> {
+                Ok(Self { #(#resolved),* })
+            }
+        }
     }
     .into()
 }
 
-/// Remove every `#[config(...)]` attribute from `attrs`, returning the
-/// `default_env = "ENV"` value if one was present.
-fn take_default_env(attrs: &mut Vec<Attribute>) -> Option<String> {
-    let mut env = None;
+fn option_str(value: &Option<String>) -> proc_macro2::TokenStream {
+    match value {
+        Some(value) => quote! { ::std::option::Option::Some(#value) },
+        None => quote! { ::std::option::Option::None },
+    }
+}
+
+/// Remove every `#[config(...)]` attribute from `attrs`, returning what it
+/// declared. An unknown key is rejected rather than ignored, so a typo does not
+/// silently drop a setting.
+fn take_setting(attrs: &mut Vec<Attribute>) -> syn::Result<Setting> {
+    let mut setting = Setting {
+        env: None,
+        default: None,
+        description: None,
+        secret: false,
+    };
+    let mut error = None;
     attrs.retain(|attr| {
         if !attr.path().is_ident("config") {
             return true;
         }
-        let _ = attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("default_env") {
-                env = Some(meta.value()?.parse::<LitStr>()?.value());
+        if let Err(e) = attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("env") {
+                setting.env = Some(meta.value()?.parse::<LitStr>()?.value());
+            } else if meta.path.is_ident("default") {
+                setting.default = Some(meta.value()?.parse::<LitStr>()?.value());
+            } else if meta.path.is_ident("description") {
+                setting.description = Some(meta.value()?.parse::<LitStr>()?.value());
+            } else if meta.path.is_ident("secret") {
+                setting.secret = true;
+            } else {
+                return Err(meta.error("unknown #[config] key (env, default, description, secret)"));
             }
             Ok(())
-        });
+        }) {
+            error = Some(e);
+        }
         false
     });
-    env
+    match error {
+        Some(e) => Err(e),
+        None => Ok(setting),
+    }
 }

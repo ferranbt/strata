@@ -7,22 +7,34 @@ use schema::HasSchema;
 use serde::{Deserialize, Serialize};
 
 use strata_sdk::page::{Cursor, ListStrategy, Page};
-use strata_sdk::provider::Provider;
 use strata_sdk::router::{Params, Route, Router};
 
 const API_BASE: &str = "https://api.github.com";
 
 #[config]
 struct Config {
-    #[config(default_env = "GITHUB_TOKEN")]
+    #[config(env = "GITHUB_TOKEN", description = "GitHub API token", secret)]
     api_key: String,
 }
 
+#[derive(strata_sdk::Provider)]
+#[config(Config)]
 pub struct Github {
     http: http_client::HttpClient,
 }
 
 impl Github {
+    fn new(config: Config) -> Result<Self> {
+        // GitHub requires a User-Agent on every request; retry rate limits / 5xx.
+        let http = http_client::HttpClient::builder()
+            .user_agent("strata/0.1")
+            .layer(http_client::RetryBackoffLayer::default())
+            .bearer_auth(&config.api_key)
+            .build()?;
+
+        Ok(Github { http })
+    }
+
     async fn api<T: for<'de> Deserialize<'de>>(
         &self,
         path: &str,
@@ -31,28 +43,8 @@ impl Github {
         let request = self.http.get(format!("{API_BASE}{path}")).query(query);
         Ok(self.http.send_json::<T>(request).await?)
     }
-}
 
-impl Provider for Github {
-    fn name() -> &'static str {
-        "github"
-    }
-
-    fn new(config: &strata_sdk::config::ProviderConfig) -> Result<Self> {
-        // GitHub requires a User-Agent on every request; retry rate limits / 5xx.
-        let mut builder = http_client::HttpClient::builder()
-            .user_agent("strata/0.1")
-            .layer(http_client::RetryBackoffLayer::default());
-
-        let config: Config = config.decode()?;
-        builder = builder.bearer_auth(&config.api_key);
-
-        Ok(Github {
-            http: builder.build()?,
-        })
-    }
-
-    fn register(r: &mut Router<Self>) {
+    fn routes(r: &mut Router<Self>) {
         r.add(
             Route::new()
                 .path("/repos/:owner/:name")
@@ -245,7 +237,7 @@ mod tests {
 
     fn client() -> Result<Client<Github>> {
         let config: strata_sdk::config::ProviderConfig =
-            serde_json::from_value(serde_json::json!({ "backend": "github" }))?;
+            serde_json::from_value(serde_json::json!({ "backend": "github", "api_key": "test" }))?;
         Client::<Github>::mount(&config)
     }
 

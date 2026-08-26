@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
-use strata_sdk::{
-    Cursor, Page, Params, Provider, ProviderConfig, Router, page::ListStrategy, router::Route,
-};
+use strata_sdk::{Cursor, Page, Params, Router, page::ListStrategy, router::Route};
 use anyhow::{Result, anyhow};
 use strata_sdk::config;
 use http::header::{AUTHORIZATION, CONTENT_TYPE};
@@ -15,22 +13,18 @@ const BASE_URL: &str = "https://api.linear.app/graphql";
 
 #[config]
 pub struct Config {
-    #[config(default_env = "LINEAR_TOKEN")]
+    #[config(env = "LINEAR_TOKEN", description = "Linear API token", secret)]
     token: String,
 }
 
+#[derive(strata_sdk::Provider)]
+#[config(Config)]
 pub struct Linear {
     http: http_client::HttpClient,
 }
 
-impl Provider for Linear {
-    fn name() -> &'static str {
-        "linear"
-    }
-
-    fn new(config: &ProviderConfig) -> Result<Self> {
-        let config: Config = config.decode()?;
-
+impl Linear {
+    fn new(config: Config) -> Result<Self> {
         let http = http_client::HttpClient::builder()
             .base_url(BASE_URL)
             .default_header(CONTENT_TYPE, "application/json".parse()?)
@@ -40,7 +34,7 @@ impl Provider for Linear {
         Ok(Self { http })
     }
 
-    fn register(r: &mut Router<Self>) {
+    fn routes(r: &mut Router<Self>) {
         r.add(
             Route::new()
                 .path("/issues")
@@ -124,7 +118,7 @@ mod tests {
 
     fn client() -> Result<Client<Linear>> {
         let config: strata_sdk::config::ProviderConfig =
-            serde_json::from_value(serde_json::json!({ "backend": "linear" }))?;
+            serde_json::from_value(serde_json::json!({ "backend": "linear", "token": "test" }))?;
         Client::<Linear>::mount(&config)
     }
 
