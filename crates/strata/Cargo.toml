@@ -47,62 +47,20 @@ axum = "0.8"
 rmcp = { version = "2.2.0", features = ["server", "macros", "transport-streamable-http-server", "server-side-http"] }
 strata-proto = { version = "0.1.0", path = "../strata-proto" }
 tokio-stream = { version = "0.1.19", features = ["net"] }
-
-[[bin]]
-name = "strata-clickhouse"
-path = "src/providers/clickhouse/cmd/main.rs"
-
-[[bin]]
-name = "strata-congress"
-path = "src/providers/congress/cmd/main.rs"
-
-[[bin]]
-name = "strata-dummy"
-path = "src/providers/dummy/cmd/main.rs"
-
-[[bin]]
-name = "strata-fs"
-path = "src/providers/fs/cmd/main.rs"
-
-[[bin]]
-name = "strata-github"
-path = "src/providers/github/cmd/main.rs"
-
-[[bin]]
-name = "strata-google"
-path = "src/providers/google/cmd/main.rs"
-
-[[bin]]
-name = "strata-iceberg"
-path = "src/providers/iceberg/cmd/main.rs"
-
-[[bin]]
-name = "strata-linear"
-path = "src/providers/linear/cmd/main.rs"
-
-[[bin]]
-name = "strata-mysql"
-path = "src/providers/mysql/cmd/main.rs"
-
-[[bin]]
-name = "strata-postgres"
-path = "src/providers/postgres/cmd/main.rs"
-
-[[bin]]
-name = "strata-rss"
-path = "src/providers/rss/cmd/main.rs"
-
-[[bin]]
-name = "strata-spotify"
-path = "src/providers/spotify/cmd/main.rs"
-
-[[bin]]
-name = "strata-sqlite"
-path = "src/providers/sqlite/cmd/main.rs"
-
-[[bin]]
-name = "strata-substack"
-path = "src/providers/substack/cmd/main.rs"
+strata-sdk = { version = "0.1.0", path = "../strata-sdk" }
+strata-clickhouse = { version = "0.1.0", path = "../../providers/clickhouse" }
+strata-congress = { version = "0.1.0", path = "../../providers/congress" }
+strata-fs = { version = "0.1.0", path = "../../providers/fs" }
+strata-github = { version = "0.1.0", path = "../../providers/github" }
+strata-google = { version = "0.1.0", path = "../../providers/google" }
+strata-iceberg = { version = "0.1.0", path = "../../providers/iceberg" }
+strata-linear = { version = "0.1.0", path = "../../providers/linear" }
+strata-mysql = { version = "0.1.0", path = "../../providers/mysql" }
+strata-postgres = { version = "0.1.0", path = "../../providers/postgres" }
+strata-rss = { version = "0.1.0", path = "../../providers/rss" }
+strata-spotify = { version = "0.1.0", path = "../../providers/spotify" }
+strata-substack = { version = "0.1.0", path = "../../providers/substack" }
+strata-sqlite = { version = "0.1.0", path = "../../providers/sqlite" }
 
 [dev-dependencies]
 dockertest = { path = "../dockertest" }

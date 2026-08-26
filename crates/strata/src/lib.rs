@@ -3,21 +3,17 @@
 
 pub mod catalog;
 pub mod config;
-pub mod datagen;
 pub mod flight;
 pub mod graphql;
 pub mod harness;
 pub mod mcp;
-pub mod plugin;
-pub mod page;
 pub mod pipe;
-pub mod provider;
 pub mod providers;
-pub mod record;
-pub mod request;
-pub mod router;
 #[cfg(test)]
-pub mod testkit;
+mod remote;
+pub mod request;
+
+pub use strata_sdk::{datagen, page, plugin, provider, record, router, sql, testkit};
 
 use std::path::Path;
 

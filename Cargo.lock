@@ -4472,7 +4472,21 @@ dependencies = [
  "serde_json",
  "serde_urlencoded",
  "sqlx",
+ "strata-clickhouse",
+ "strata-congress",
+ "strata-fs",
+ "strata-github",
+ "strata-google",
+ "strata-iceberg",
+ "strata-linear",
+ "strata-mysql",
+ "strata-postgres",
  "strata-proto",
+ "strata-rss",
+ "strata-sdk",
+ "strata-spotify",
+ "strata-sqlite",
+ "strata-substack",
  "strata-types",
  "tokio",
  "tokio-postgres",
@@ -4486,6 +4500,145 @@ dependencies = [
 ]
 
 [[package]]
+name = "strata-clickhouse"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "config-macro",
+ "dockertest",
+ "http-client",
+ "schema",
+ "serde",
+ "serde_json",
+ "strata-sdk",
+ "tokio",
+]
+
+[[package]]
+name = "strata-congress"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "config-macro",
+ "http-client",
+ "schema",
+ "serde",
+ "serde_json",
+ "strata-sdk",
+ "tokio",
+]
+
+[[package]]
+name = "strata-fs"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "schema",
+ "serde",
+ "serde_json",
+ "strata-sdk",
+ "tokio",
+]
+
+[[package]]
+name = "strata-github"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "config-macro",
+ "http",
+ "http-client",
+ "schema",
+ "serde",
+ "serde_json",
+ "strata-sdk",
+ "tokio",
+]
+
+[[package]]
+name = "strata-google"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "config-macro",
+ "http-client",
+ "schema",
+ "serde",
+ "serde_json",
+ "strata-sdk",
+ "tokio",
+ "urlencoding",
+]
+
+[[package]]
+name = "strata-iceberg"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arrow",
+ "arrow-array",
+ "arrow-schema",
+ "config-macro",
+ "futures",
+ "iceberg",
+ "iceberg-catalog-sql",
+ "parquet",
+ "schema",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "strata-sdk",
+ "tokio",
+]
+
+[[package]]
+name = "strata-linear"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "config-macro",
+ "http",
+ "http-client",
+ "schema",
+ "serde",
+ "serde_json",
+ "strata-sdk",
+ "tokio",
+]
+
+[[package]]
+name = "strata-mysql"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "config-macro",
+ "dockertest",
+ "schema",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "strata-sdk",
+ "tokio",
+]
+
+[[package]]
+name = "strata-postgres"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "config-macro",
+ "dockertest",
+ "schema",
+ "serde",
+ "serde_json",
+ "strata-sdk",
+ "tokio",
+ "tokio-postgres",
+ "tracing",
+]
+
+[[package]]
 name = "strata-proto"
 version = "0.1.0"
 dependencies = [
@@ -4493,6 +4646,89 @@ dependencies = [
  "tonic",
  "tonic-prost",
  "tonic-prost-build",
+]
+
+[[package]]
+name = "strata-rss"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "config-macro",
+ "feed-rs",
+ "http-client",
+ "schema",
+ "serde",
+ "serde_json",
+ "strata-sdk",
+ "tokio",
+]
+
+[[package]]
+name = "strata-sdk"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arrow",
+ "arrow-array",
+ "arrow-schema",
+ "chrono",
+ "clap",
+ "futures",
+ "schema",
+ "serde",
+ "serde_arrow",
+ "serde_json",
+ "serde_urlencoded",
+ "strata-proto",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tracing",
+ "tracing-subscriber",
+ "urlencoding",
+]
+
+[[package]]
+name = "strata-spotify"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "config-macro",
+ "http-client",
+ "schema",
+ "serde",
+ "serde_json",
+ "strata-sdk",
+ "tokio",
+]
+
+[[package]]
+name = "strata-sqlite"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "config-macro",
+ "schema",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "strata-sdk",
+ "tokio",
+]
+
+[[package]]
+name = "strata-substack"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "config-macro",
+ "feed-rs",
+ "http-client",
+ "schema",
+ "serde",
+ "serde_json",
+ "strata-sdk",
+ "tokio",
 ]
 
 [[package]]

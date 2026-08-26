@@ -1,0 +1,20 @@
+[package]
+name = "strata-google"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+schema.workspace = true
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+strata-sdk.workspace = true
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
+config-macro.workspace = true
+http-client.workspace = true
+base64 = "0.22"
+urlencoding = "2"
+
+[[bin]]
+name = "strata-google"
+path = "cmd/main.rs"
