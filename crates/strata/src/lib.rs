@@ -134,7 +134,7 @@ fn mount_backend(
     match backend {
         "clickhouse" => registry.mount::<providers::clickhouse::Clickhouse>(mount, config),
         "congress" => registry.mount::<providers::congress::Congress>(mount, config),
-        "dummy" => registry.mount::<providers::dummy::Dummy>(mount, config),
+        "dummy" => registry.mount::<strata_sdk::dummy::Dummy>(mount, config),
         "fs" => registry.mount::<providers::fs::Fs>(mount, config),
         "github" => registry.mount::<providers::github::Github>(mount, config),
         "google" => registry.mount::<providers::google::Google>(mount, config),

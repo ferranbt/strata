@@ -13,4 +13,4 @@ pub use strata_rss as rss;
 pub use strata_spotify as spotify;
 pub use strata_sqlite as sqlite;
 pub use strata_substack as substack;
-pub use strata_sdk::{dummy, sql};
+pub use strata_sdk::sql;

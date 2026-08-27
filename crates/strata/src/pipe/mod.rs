@@ -120,7 +120,7 @@ mod tests {
     use super::*;
     use crate::config::ProviderConfig;
     use crate::pipe::store::NoPipeStore;
-    use crate::providers::dummy::Dummy;
+    use strata_sdk::dummy::Dummy;
     use crate::providers::sqlite::Sqlite;
     use schema::{DataType, SchemaBuilder as StrataSchemaBuilder};
 
