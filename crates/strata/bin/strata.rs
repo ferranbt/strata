@@ -160,7 +160,7 @@ async fn run() -> Result<()> {
             if let Some(path) = &cli.config {
                 options = options.config(path);
             }
-            strata::server::Strata::new(options).await?;
+            strata::server::Strata::start(options).await?;
         }
     }
     Ok(())

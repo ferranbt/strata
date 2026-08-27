@@ -229,7 +229,7 @@ impl Options {
 }
 
 impl Strata {
-    pub async fn new(options: Options) -> Result<()> {
+    pub async fn start(options: Options) -> Result<()> {
         let config = options.config.as_deref();
         let registry = Arc::new(match config {
             Some(path) => crate::registry_from_config(path).await?,
