@@ -19,7 +19,14 @@ use sync::Progress;
 pub async fn run_pass<S: PipeStore>(registry: &Registry, store: &S, pipe: &mut Pipe) -> Result<()> {
     let src = registry.get(&pipe.source.mount)?;
     let dst = registry.get(&pipe.destination.mount)?;
-    let meta = src.resolve(&pipe.source.path).await?.metadata;
+    let endpoint = src.resolve(&pipe.source.path).await?;
+    let cursor_field = endpoint
+        .response
+        .fields
+        .iter()
+        .find(|f| f.is_cursor())
+        .map(|f| f.name.clone());
+    let meta = endpoint.metadata;
     let strategy = meta.strategy.ok_or_else(|| {
         anyhow!(
             "source `{}{}` is not a list endpoint (no sync strategy)",
@@ -31,6 +38,7 @@ pub async fn run_pass<S: PipeStore>(registry: &Registry, store: &S, pipe: &mut P
     // One live stream; its `schema` is the sink's contract, held for every chunk.
     let src_path = ReadRequest::new(&pipe.source.path)
         .with_cursor(pipe.cursor.clone())
+        .with_cursor_field(cursor_field)
         .path();
     let stream = src.read(&src_path).await?;
     let schema = stream.schema.clone();

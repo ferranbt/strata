@@ -4,7 +4,6 @@
 //! test reads like `let r: WriteResult = pg.put("/tables/x", data).await?`.
 
 use futures::StreamExt;
-use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -16,12 +15,11 @@ use serde_json::Value;
 
 use crate::provider::Provider;
 use crate::record::DataStream;
-use crate::router::{Body, BoxFuture, Method, Response, Router, SchemaSource};
+use crate::router::{Body, Method, Response, Router};
 
 pub struct Client<S> {
     state: Arc<S>,
     router: Router<S>,
-    schemas: HashMap<String, Schema>,
 }
 
 impl<S: Provider> Client<S> {
@@ -29,21 +27,7 @@ impl<S: Provider> Client<S> {
         let state = Arc::new(S::new(config)?);
         let mut router = Router::new();
         S::register(&mut router);
-        Ok(Client {
-            state,
-            router,
-            schemas: HashMap::new(),
-        })
-    }
-
-    /// Register the persisted `schema` for `path`, standing in for the catalog: at
-    /// dispatch the router hands it to the handler via `Params::schema`, so e.g. a
-    /// SQL read derives its cursor column from the schema's `cursor` annotation.
-    pub fn with_schema(mut self, path: &str, schema: Schema) -> Self {
-        self.schemas.insert(path.to_string(), schema);
-        self.router
-            .set_schema_source(Arc::new(StaticSchemas(self.schemas.clone())));
-        self
+        Ok(Client { state, router })
     }
 
     pub async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
@@ -85,15 +69,6 @@ impl<S: Provider> Client<S> {
         self.router
             .dispatch(self.state.clone(), method, path, body)
             .await
-    }
-}
-
-struct StaticSchemas(HashMap<String, Schema>);
-
-impl SchemaSource for StaticSchemas {
-    fn schema(&self, path: String) -> BoxFuture<'static, Result<Option<Schema>>> {
-        let found = self.0.get(&path).cloned();
-        Box::pin(async move { Ok(found) })
     }
 }
 

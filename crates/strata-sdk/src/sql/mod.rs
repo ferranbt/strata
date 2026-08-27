@@ -351,7 +351,7 @@ pub async fn table_stream<S: SqlSource>(db: Arc<S>, p: Params) -> Result<Pages> 
     // projected schema governs what's returned. The cursor is resolved off the full
     // schema so ordering works even when the cursor column is projected away.
     // TODO: Select the table fields at the provider level itself.
-    let full = enrich(db.table_schema(&name).await?, p.schema());
+    let full = db.table_schema(&name).await?;
     let projection = get_projection(&p);
     let schema = project_schema(&full, projection.as_deref())?;
 
@@ -443,33 +443,17 @@ fn normalize_temporals(schema: &Schema, rows: &mut [Value]) {
     }
 }
 
-/// Resolve the cursor column for a read, by precedence: (1) a `cursor` annotation
-/// on the endpoint's persisted schema, (2) an explicit `?cursor_field=`, (3) an
-/// auto-detected `created_at`/`updated_at` column. `None` → blind offset paging.
+/// Resolve the cursor column for a read, by precedence: (1) an explicit
+/// `?cursor_field=`, (2) an auto-detected `created_at`/`updated_at` column.
+/// `None` → blind offset paging.
+///
+/// A table cannot say which of its columns is a cursor — that is strata's notion,
+/// not SQL's — so the caller says. The provider only obeys.
 fn resolve_cursor(p: &Params, schema: &Schema) -> Option<String> {
-    // (1) A cursor annotation on the persisted schema the router resolved for this
-    // endpoint (e.g. propagated from a source during a pipe).
-    if let Some(col) = cursor_annotation(schema) {
-        return Some(col);
-    }
-    // (2) Explicitly supplied by the caller.
-    // TODO: Eventually we want to have the Cursor be modified as well by user
-    // request.
     if let Some(col) = p.query("cursor_field") {
         return Some(col.to_string());
     }
-    // (3) Auto-detected from the table's own columns.
     autodetect_cursor(schema)
-}
-
-/// The name of the field carrying a `cursor` annotation, if any (unwrapping a
-/// `List` row `Struct`).
-fn cursor_annotation(schema: &Schema) -> Option<String> {
-    schema
-        .fields
-        .iter()
-        .find(|f| f.is_cursor())
-        .map(|f| f.name.clone())
 }
 
 /// A conventional cursor column present on the table: `created_at` (append-only,
@@ -487,22 +471,8 @@ fn autodetect_cursor(schema: &Schema) -> Option<String> {
 
 /// The `.data_type()` resolver for `/tables/:table/data`.
 pub async fn table_data_schema<S: SqlSource>(db: Arc<S>, p: Params) -> Result<Schema> {
-    let full = enrich(db.table_schema(p.get("table")?).await?, p.schema());
+    let full = db.table_schema(p.get("table")?).await?;
     project_schema(&full, get_projection(&p).as_deref())
-}
-
-fn enrich(mut schema: Schema, annotated: Option<&Schema>) -> Schema {
-    let Some(annotated) = annotated else {
-        return schema;
-    };
-    for field in &mut schema.fields {
-        if let Some(source) = annotated.fields.iter().find(|f| f.name == field.name) {
-            for (key, value) in source.annotations.to_map() {
-                field.annotate(key, value);
-            }
-        }
-    }
-    schema
 }
 
 /// `put /tables/:table`: sink a [`DataStream`]. Decodes the `disposition` param and

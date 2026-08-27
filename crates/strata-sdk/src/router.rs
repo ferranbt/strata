@@ -37,16 +37,6 @@ pub const CURSOR_PARAM: &str = "cursor";
 /// re-applies it on every page of a [`DataStream`], so it holds for the whole scan.
 const LIMIT_PARAM: &str = "limit";
 
-/// Supplies an endpoint's persisted schema to the router at dispatch time. The
-/// router depends only on this trait — `serve` wires in the concrete catalog. When
-/// one is set, dispatch looks up the matched path's schema and hands it to the
-/// handler via [`Params::schema`], so a handler reads its own annotations (key,
-/// cursor) without touching the catalog itself.
-pub trait SchemaSource: Send + Sync {
-    /// The persisted schema for the endpoint at `path`, or `None` if none recorded.
-    fn schema(&self, path: String) -> BoxFuture<'static, Result<Option<Schema>>>;
-}
-
 /// Inputs to a handler: path captures (e.g. `{owner: "rust-lang"}`) plus the
 /// parsed query-string params from the call path (`?limit=20&cursor=…`), read by
 /// name via [`query`](Params::query) or the framework accessors ([`cursor`],
@@ -58,7 +48,6 @@ pub trait SchemaSource: Send + Sync {
 pub struct Params {
     map: HashMap<String, String>,
     query: HashMap<String, String>,
-    schema: Option<Schema>,
 }
 
 impl Params {
@@ -73,10 +62,6 @@ impl Params {
     /// A single query param by name, or `None` if it wasn't supplied.
     pub fn query(&self, key: &str) -> Option<&str> {
         self.query.get(key).map(String::as_str)
-    }
-
-    pub fn schema(&self) -> Option<&Schema> {
-        self.schema.as_ref()
     }
 
     /// The resume cursor, decoded into the provider's own cursor state `C` — the
@@ -716,14 +701,12 @@ impl Serialize for EndpointInfo {
 /// Maps route patterns to handlers for one provider whose state is `S`.
 pub struct Router<S> {
     routes: Vec<Entry<S>>,
-    schema_source: Option<Arc<dyn SchemaSource>>,
 }
 
 impl<S> Default for Router<S> {
     fn default() -> Self {
         Router {
             routes: Vec::new(),
-            schema_source: None,
         }
     }
 }
@@ -731,12 +714,6 @@ impl<S> Default for Router<S> {
 impl<S: Send + Sync + 'static> Router<S> {
     pub fn new() -> Self {
         Router::default()
-    }
-
-    /// Wire the schema source (called by `serve` once the catalog DB is up), so
-    /// dispatch can hand each handler the persisted schema for its endpoint.
-    pub fn set_schema_source(&mut self, source: Arc<dyn SchemaSource>) {
-        self.schema_source = Some(source);
     }
 
     /// Register a built [`Route`]. Panics at startup if the route has no
@@ -771,9 +748,6 @@ impl<S: Send + Sync + 'static> Router<S> {
                 && let Some(mut params) = route.pattern.match_path(raw_path)
             {
                 params.set_query(query);
-                if let Some(source) = &self.schema_source {
-                    params.schema = source.schema(raw_path.to_string()).await?;
-                }
                 return Ok((route, params));
             }
         }

@@ -33,8 +33,12 @@ const JSON: &str = "JSON";
 
 /// Serve the GraphQL schema over HTTP: `POST /graphql` runs queries, `GET /graphql`
 /// is the GraphiQL explorer, `GET /schema` returns the SDL (every type and field).
-pub async fn serve(registry: Arc<Registry>, addr: std::net::SocketAddr) -> Result<()> {
-    let schema = build_schema(&registry).await?;
+pub async fn serve(
+    registry: Arc<Registry>,
+    addr: std::net::SocketAddr,
+    schemas: Option<Arc<dyn SchemaStore>>,
+) -> Result<()> {
+    let schema = build_schema(&registry, schemas.as_deref()).await?;
     let sdl = schema.sdl();
     let app = axum::Router::new()
         .route("/graphql", get(graphiql).post_service(GraphQL::new(schema)))
@@ -53,9 +57,46 @@ async fn graphiql() -> impl IntoResponse {
     )
 }
 
-/// Build the dynamic schema: one query field per queryable table across all mounts.
-/// Snapshotted at startup (tables added later need a rebuild).
-async fn build_schema(registry: &Arc<Registry>) -> Result<Schema> {
+pub trait SchemaStore: Send + Sync {
+    fn schema(
+        &self,
+        mount: String,
+        path: String,
+    ) -> crate::router::BoxFuture<'static, Result<Option<StrataSchema>>>;
+}
+
+impl SchemaStore for database::Database {
+    fn schema(
+        &self,
+        mount: String,
+        path: String,
+    ) -> crate::router::BoxFuture<'static, Result<Option<StrataSchema>>> {
+        let db = self.clone();
+        Box::pin(async move {
+            db.get_source_schema(&strata_types::Endpoint::new(mount, path))
+                .await
+        })
+    }
+}
+
+fn annotate(mut reported: StrataSchema, recorded: Option<StrataSchema>) -> StrataSchema {
+    let Some(recorded) = recorded else {
+        return reported;
+    };
+    for field in &mut reported.fields {
+        if let Some(source) = recorded.fields.iter().find(|f| f.name == field.name) {
+            for (key, value) in source.annotations.to_map() {
+                field.annotate(key, value);
+            }
+        }
+    }
+    reported
+}
+
+async fn build_schema(
+    registry: &Arc<Registry>,
+    schemas: Option<&dyn SchemaStore>,
+) -> Result<Schema> {
     let mut tables_meta = Vec::new();
     for mount in registry.names() {
         for table in tables(registry, &mount).await {
@@ -67,8 +108,17 @@ async fn build_schema(registry: &Arc<Registry>) -> Result<Schema> {
             if !endpoint.metadata.queryable {
                 continue;
             }
+            let recorded = match schemas {
+                Some(store) => store.schema(mount.clone(), path.clone()).await?,
+                None => None,
+            };
             let type_name = format!("{mount}_{table}");
-            tables_meta.push((mount.clone(), table, type_name, endpoint.response));
+            tables_meta.push((
+                mount.clone(),
+                table,
+                type_name,
+                annotate(endpoint.response, recorded),
+            ));
         }
     }
     let known: HashSet<String> = tables_meta.iter().map(|(_, _, t, _)| t.clone()).collect();
@@ -314,10 +364,10 @@ mod tests {
     use super::*;
     use crate::config::ProviderConfig;
     use crate::pipe::{run_pass, store::NoPipeStore};
-    use strata_sdk::dummy::Dummy;
     use crate::providers::sqlite::Sqlite;
     use schema::{DataType, HasSchema, SchemaBuilder};
     use serde_json::json;
+    use strata_sdk::dummy::Dummy;
     use strata_types::{Endpoint, Pipe};
 
     #[tokio::test]
@@ -347,7 +397,7 @@ mod tests {
         run_pass(&registry, &NoPipeStore, &mut pipe).await?;
 
         let registry = Arc::new(registry);
-        let schema = build_schema(&registry).await?;
+        let schema = build_schema(&registry, None).await?;
 
         let run = |query: &'static str| {
             let schema = schema.clone();
@@ -386,14 +436,15 @@ mod tests {
         Ok(())
     }
 
-    struct StaticSource(std::collections::HashMap<String, StrataSchema>);
+    struct StaticSource(std::collections::HashMap<(String, String), StrataSchema>);
 
-    impl crate::router::SchemaSource for StaticSource {
+    impl SchemaStore for StaticSource {
         fn schema(
             &self,
+            mount: String,
             path: String,
         ) -> crate::router::BoxFuture<'static, Result<Option<StrataSchema>>> {
-            let found = self.0.get(&path).cloned();
+            let found = self.0.get(&(mount, path)).cloned();
             Box::pin(async move { Ok(found) })
         }
     }
@@ -448,27 +499,39 @@ mod tests {
         put(
             &registry,
             "/tables/customers",
-            &[Customer { id: 1, name: "acme".into() }],
+            &[Customer {
+                id: 1,
+                name: "acme".into(),
+            }],
         )
         .await?;
         put(
             &registry,
             "/tables/orders",
-            &[Order { id: 10, customer_id: 1 }],
+            &[Order {
+                id: 10,
+                customer_id: 1,
+            }],
         )
         .await?;
 
         let mut declared = std::collections::HashMap::new();
-        declared.insert("/tables/orders".to_string(), OrderRel::schema());
-        registry.set_schema_source("local", Arc::new(StaticSource(declared)))?;
+        declared.insert(
+            ("local".to_string(), "/tables/orders".to_string()),
+            OrderRel::schema(),
+        );
 
         let registry = Arc::new(registry);
-        let schema = build_schema(&registry).await?;
+        let schema = build_schema(&registry, Some(&StaticSource(declared))).await?;
 
         let response = schema
             .execute("{ local_orders { id customer { id name } } }")
             .await;
-        assert!(response.errors.is_empty(), "graphql errors: {:?}", response.errors);
+        assert!(
+            response.errors.is_empty(),
+            "graphql errors: {:?}",
+            response.errors
+        );
         let data = response.data.into_json().unwrap();
         let order = &data["local_orders"][0];
         assert_eq!(order["id"], 10);

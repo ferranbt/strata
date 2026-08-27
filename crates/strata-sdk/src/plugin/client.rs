@@ -4,7 +4,6 @@
 //! registry, pipe, Flight, GraphQL, and MCP cannot tell it from an in-process
 //! one — they all address it by mount and path exactly as before.
 
-use std::sync::Arc;
 
 use anyhow::{Result, anyhow, bail};
 use futures::StreamExt;
@@ -18,7 +17,7 @@ use tonic::transport::Channel;
 use crate::config::ProviderConfig;
 use crate::provider::ProviderObject;
 use crate::record::DataStream;
-use crate::router::{Body, BoxFuture, EndpointInfo, Method, Response, SchemaSource};
+use crate::router::{Body, BoxFuture, EndpointInfo, Method, Response};
 use strata_proto::WriteStart;
 
 use super::{decode_endpoint, decode_page, encode_method, encode_page};
@@ -81,17 +80,6 @@ impl RemoteProvider {
 impl ProviderObject for RemoteProvider {
     fn name(&self) -> &str {
         &self.mount
-    }
-
-    // TODO: a catalog schema can't be pushed to another process through a live
-    // callback. Until the schema travels with the request, a remote provider's
-    // handlers see no persisted schema, so anything reading `Params::schema` (a
-    // SQL `cursor` annotation) falls back to its own detection.
-    fn set_schema_source(&mut self, _source: Arc<dyn SchemaSource>) {
-        tracing::warn!(
-            "`{}` is served over grpc; its catalog schema is not pushed down",
-            self.mount
-        );
     }
 
     fn endpoints(&self) -> Vec<EndpointInfo> {
