@@ -23,7 +23,7 @@ pub use client::{RemoteProvider, connect};
 
 use crate::config::ProviderConfig;
 use crate::page::ListStrategy;
-use crate::provider::{Provider, ProviderObject, Registry};
+use crate::provider::{Provider, ProviderObject};
 use crate::record::{Batch, BatchPage, DataStream, Disposition};
 use crate::router::{Body, Method};
 
@@ -76,29 +76,22 @@ pub async fn serve_on<P: Provider>(addr: SocketAddr) -> Result<()> {
 }
 
 struct Plugin<P> {
-    mounted: OnceLock<(HashMap<String, String>, Arc<Registry>)>,
+    mounted: OnceLock<(HashMap<String, String>, Arc<dyn ProviderObject>)>,
     provider: PhantomData<fn() -> P>,
 }
 
 impl<P: Provider> Plugin<P> {
-    /// The registry holding the mounted instance, or an error if `Mount` has not
-    /// been called yet.
-    fn mounted(&self) -> Result<Arc<Registry>, Status> {
+    /// The mounted instance, or an error if `Mount` has not been called yet.
+    fn mounted(&self) -> Result<Arc<dyn ProviderObject>, Status> {
         self.mounted
             .get()
-            .map(|(_, registry)| registry.clone())
+            .map(|(_, provider)| provider.clone())
             .ok_or_else(|| Status::failed_precondition("provider is not mounted"))
     }
 }
 
 fn failed(error: anyhow::Error) -> Status {
     Status::internal(format!("{error:#}"))
-}
-
-fn provider<P: Provider>(registry: &Registry) -> Result<&dyn ProviderObject, Status> {
-    registry
-        .get(P::name())
-        .map_err(|e| Status::internal(e.to_string()))
 }
 
 /// Rebuild the [`ProviderConfig`] from the wire's string map. `backend` and
@@ -140,11 +133,9 @@ impl<P: Provider> ProviderService for Plugin<P> {
             )));
         }
         let config = decode_config(settings.clone())?;
-        let mut registry = Registry::new();
-        registry
-            .mount::<P>(P::name(), &config)
+        let instance = crate::provider::instance::<P>(&config)
             .map_err(|e| Status::invalid_argument(format!("mounting `{}`: {e:#}", P::name())))?;
-        let _ = self.mounted.set((settings, Arc::new(registry)));
+        let _ = self.mounted.set((settings, Arc::from(instance)));
         Ok(Response::new(MountResponse {
             name: P::name().to_string(),
         }))
@@ -155,8 +146,8 @@ impl<P: Provider> ProviderService for Plugin<P> {
         request: Request<EndpointsRequest>,
     ) -> Result<Response<EndpointsResponse>, Status> {
         let request = request.into_inner();
-        let registry = self.mounted()?;
-        let provider = provider::<P>(&registry)?;
+        let provider = self.mounted()?;
+
         let endpoints = match &request.path {
             Some(path) => vec![provider.resolve(path).await.map_err(failed)?],
             None => provider.endpoints(),
@@ -174,8 +165,8 @@ impl<P: Provider> ProviderService for Plugin<P> {
         request: Request<ReadRequest>,
     ) -> Result<Response<Self::ReadStream>, Status> {
         let path = request.into_inner().path;
-        let registry = self.mounted()?;
-        let stream = provider::<P>(&registry)?.read(&path).await.map_err(failed)?;
+        let provider = self.mounted()?;
+        let stream = provider.read(&path).await.map_err(failed)?;
         let DataStream { schema, chunks } = stream;
 
         let declared = serde_json::to_string(&schema).map_err(|e| Status::internal(e.to_string()))?;
@@ -229,8 +220,8 @@ impl<P: Provider> ProviderService for Plugin<P> {
             data: Some(DataStream { schema, chunks }),
             meta: serde_json::Value::Null,
         };
-        let registry = self.mounted()?;
-        let response = provider::<P>(&registry)?
+        let provider = self.mounted()?;
+        let response = provider
             .invoke(Method::Put, &start.path, Some(body))
             .await
             .map_err(failed)?;
@@ -254,8 +245,8 @@ impl<P: Provider> ProviderService for Plugin<P> {
             }),
             None => None,
         };
-        let registry = self.mounted()?;
-        let response = provider::<P>(&registry)?
+        let provider = self.mounted()?;
+        let response = provider
             .invoke(method, &request.path, body)
             .await
             .map_err(failed)?;

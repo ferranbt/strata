@@ -8,6 +8,7 @@ pub mod harness;
 pub mod mcp;
 pub mod pipe;
 pub mod providers;
+pub mod registry;
 #[cfg(test)]
 mod remote;
 pub mod request;
@@ -20,7 +21,8 @@ use anyhow::Result;
 
 pub use config::{Config, ProviderConfig};
 pub use page::{Cursor, Page};
-pub use provider::{Provider, ProviderObject, Registry};
+pub use provider::{Provider, ProviderObject};
+pub use registry::Registry;
 pub use record::{DataStream, Disposition};
 pub use router::{Body, EndpointInfo, Method, Params, Response, Router};
 
