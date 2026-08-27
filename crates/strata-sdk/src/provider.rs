@@ -39,7 +39,6 @@ pub trait Provider: Sized + Send + Sync + 'static {
 /// share one collection. Object-safe: `call` returns a boxed future rather than
 /// being an `async fn`.
 pub trait ProviderObject: Send + Sync {
-    fn name(&self) -> &str;
     /// Every endpoint, statically described (dynamic resolvers not run).
     fn endpoints(&self) -> Vec<EndpointInfo>;
     /// The read endpoint matching a concrete `path`, with its response schema
@@ -70,10 +69,6 @@ impl<S: Send + Sync + 'static> ProviderObject for Instance<S>
 where
     S: Provider,
 {
-    fn name(&self) -> &str {
-        S::name()
-    }
-
     fn endpoints(&self) -> Vec<EndpointInfo> {
         self.router.endpoints()
     }
@@ -179,5 +174,130 @@ impl Registry {
             }
         }
         Value::Object(map)
+    }
+}
+
+fn split_mount(path: &str) -> Result<(&str, String)> {
+    let (raw, query) = path.split_once('?').unwrap_or((path, ""));
+    let mut segments = raw.split('/').filter(|s| !s.is_empty());
+    let mount = segments
+        .next()
+        .ok_or_else(|| anyhow!("`{path}` names no mount"))?;
+    let rest = format!("/{}", segments.collect::<Vec<_>>().join("/"));
+    match query.is_empty() {
+        true => Ok((mount, rest)),
+        false => Ok((mount, format!("{rest}?{query}"))),
+    }
+}
+
+impl ProviderObject for Registry {
+    fn endpoints(&self) -> Vec<EndpointInfo> {
+        let mut all = Vec::new();
+        for mount in self.names() {
+            let Ok(provider) = self.get(&mount) else {
+                continue;
+            };
+            for mut endpoint in provider.endpoints() {
+                endpoint.path = format!("/{mount}{}", endpoint.path);
+                all.push(endpoint);
+            }
+        }
+        all
+    }
+
+    fn resolve<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<EndpointInfo>> {
+        Box::pin(async move {
+            let (mount, rest) = split_mount(path)?;
+            let mut endpoint = self.get(mount)?.resolve(&rest).await?;
+            endpoint.path = format!("/{mount}{}", endpoint.path);
+            Ok(endpoint)
+        })
+    }
+
+    fn read<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<DataStream>> {
+        Box::pin(async move {
+            let (mount, rest) = split_mount(path)?;
+            self.get(mount)?.read(&rest).await
+        })
+    }
+
+    fn invoke<'a>(
+        &'a self,
+        method: Method,
+        path: &'a str,
+        body: Option<Body>,
+    ) -> BoxFuture<'a, Result<Response>> {
+        Box::pin(async move {
+            let (mount, rest) = split_mount(path)?;
+            self.get(mount)?.invoke(method, &rest, body).await
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dummy::Dummy;
+
+    fn registry() -> Result<Registry> {
+        let mut registry = Registry::new();
+        registry.mount::<Dummy>("gen", &ProviderConfig::default())?;
+        Ok(registry)
+    }
+
+    #[test]
+    fn splits_the_mount_off_a_path_keeping_the_query() -> Result<()> {
+        assert_eq!(split_mount("/gen/data")?, ("gen", "/data".to_string()));
+        assert_eq!(
+            split_mount("/gen/data?rows=5&limit=2")?,
+            ("gen", "/data?rows=5&limit=2".to_string())
+        );
+        assert_eq!(
+            split_mount("/gen/tables/t")?,
+            ("gen", "/tables/t".to_string())
+        );
+        assert!(split_mount("/").is_err());
+        Ok(())
+    }
+
+    /// The registry answers by path like any other provider, dispatching on the
+    /// leading segment.
+    #[tokio::test]
+    async fn reads_through_the_mount_prefix() -> Result<()> {
+        let registry = registry()?;
+        let schema = serde_json::json!({
+            "fields": [{ "name": "id", "data_type": "Int64", "nullable": false }]
+        });
+        let encoded = urlencoding::encode(&schema.to_string()).into_owned();
+        let path = format!("/gen/data?schema={encoded}&rows=3");
+
+        let stream = ProviderObject::read(&registry, &path).await?;
+        let schema = stream.schema.clone();
+        let page = stream.first().await?.expect("a page");
+        assert_eq!(page.data.to_json_rows(&schema)?.len(), 3);
+        Ok(())
+    }
+
+    /// Endpoints come back mount-prefixed, so one listing addresses every mount.
+    #[test]
+    fn endpoints_carry_their_mount() -> Result<()> {
+        let registry = registry()?;
+        let paths: Vec<String> = ProviderObject::endpoints(&registry)
+            .into_iter()
+            .map(|e| e.path)
+            .collect();
+        assert_eq!(paths, vec!["/gen/data".to_string()]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn an_unknown_mount_errors() -> Result<()> {
+        let registry = registry()?;
+        let error = match ProviderObject::read(&registry, "/nope/data").await {
+            Err(error) => error,
+            Ok(_) => panic!("no such mount"),
+        };
+        assert!(error.to_string().contains("nothing mounted at `nope`"));
+        Ok(())
     }
 }
