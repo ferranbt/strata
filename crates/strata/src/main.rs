@@ -228,21 +228,15 @@ async fn run() -> Result<()> {
                 None => Vec::new(),
             };
 
-            // Connect the catalog when there are pipes, and wire it into the
-            // registry (each provider scoped to its mount) before sharing it.
-            let mut registry = registry;
             let db = if pipes.is_empty() {
                 None
             } else {
-                let db =
-                    database::Database::new(std::env::var("DATABASE_URL").ok().as_deref()).await?;
-                for mount in registry.mounts() {
-                    let catalog = strata::Catalog::new(db.clone(), mount.clone());
-                    registry.set_schema_source(&mount, std::sync::Arc::new(catalog))?;
-                }
-                Some(db)
+                Some(database::Database::new(std::env::var("DATABASE_URL").ok().as_deref()).await?)
             };
             let registry = std::sync::Arc::new(registry);
+            let schemas = db.clone().map(|db| {
+                std::sync::Arc::new(db) as std::sync::Arc<dyn strata::graphql::SchemaStore>
+            });
 
             if let Some(db) = db {
                 for pipe in &pipes {
@@ -288,7 +282,7 @@ async fn run() -> Result<()> {
 
             tokio::try_join!(
                 strata::flight::serve(registry.clone(), addr),
-                strata::graphql::serve(registry.clone(), graphql_addr),
+                strata::graphql::serve(registry.clone(), graphql_addr, schemas),
                 strata::mcp::serve(registry, mcp_addr),
             )?;
         }

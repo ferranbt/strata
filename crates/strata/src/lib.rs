@@ -1,7 +1,6 @@
 //! strata: define a data provider's API as typed Rust endpoints, register them
 //! in a router, and call any endpoint by path.
 
-pub mod catalog;
 pub mod config;
 pub mod flight;
 pub mod graphql;
@@ -19,7 +18,6 @@ use std::path::Path;
 
 use anyhow::Result;
 
-pub use catalog::Catalog;
 pub use config::{Config, ProviderConfig};
 pub use page::{Cursor, Page};
 pub use provider::{Provider, ProviderObject, Registry};

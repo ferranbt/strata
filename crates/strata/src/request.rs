@@ -5,10 +5,11 @@
 use crate::record::Disposition;
 use crate::router::CURSOR_PARAM;
 
-/// A read path plus an optional resume `cursor`.
+/// A read path plus an optional resume `cursor` and cursor column.
 pub struct ReadRequest {
     path: String,
     cursor: Option<String>,
+    cursor_field: Option<String>,
 }
 
 impl ReadRequest {
@@ -16,6 +17,7 @@ impl ReadRequest {
         ReadRequest {
             path: path.into(),
             cursor: None,
+            cursor_field: None,
         }
     }
 
@@ -25,9 +27,15 @@ impl ReadRequest {
         self
     }
 
-    /// The encoded path, with `?cursor=…` set or removed to match the cursor.
+    /// Name the column to page by.
+    pub fn with_cursor_field(mut self, field: Option<String>) -> Self {
+        self.cursor_field = field;
+        self
+    }
+
     pub fn path(self) -> String {
-        set_param(&self.path, CURSOR_PARAM, self.cursor.as_deref())
+        let path = set_param(&self.path, CURSOR_PARAM, self.cursor.as_deref());
+        set_param(&path, "cursor_field", self.cursor_field.as_deref())
     }
 }
 
