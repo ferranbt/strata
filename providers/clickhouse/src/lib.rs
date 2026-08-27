@@ -1,38 +1,34 @@
 use anyhow::{Context, Result, anyhow, bail};
-use config_macro::config;
+use strata_sdk::config;
 use http_client::HttpClient;
 use schema::{DataType, Field, Schema};
 use serde::Deserialize;
 use serde_json::Value;
 
-use strata_sdk::provider::Provider;
 use strata_sdk::sql::{self, Filter, SqlCursor, SqlError, SqlSource, WriteResult, quote_str};
 use strata_sdk::record::{Batch, Disposition};
 use strata_sdk::router::Router;
 
 #[config]
 struct Config {
-    #[config(default_env = "CLICKHOUSE_URL")]
+    #[config(env = "CLICKHOUSE_URL", description = "HTTP interface URL")]
     url: String,
-    #[config(default_env = "CLICKHOUSE_DATABASE")]
+    #[config(env = "CLICKHOUSE_DATABASE", default = "default")]
     database: String,
-    #[config(default_env = "CLICKHOUSE_USER")]
+    #[config(env = "CLICKHOUSE_USER", default = "default")]
     user: String,
-    #[config(default_env = "CLICKHOUSE_PASSWORD")]
+    #[config(env = "CLICKHOUSE_PASSWORD", default = "", secret)]
     password: String,
 }
 
+#[derive(strata_sdk::Provider)]
+#[config(Config)]
 pub struct Clickhouse {
     http: HttpClient,
 }
 
-impl Provider for Clickhouse {
-    fn name() -> &'static str {
-        "clickhouse"
-    }
-
-    fn new(config: &strata_sdk::config::ProviderConfig) -> Result<Self> {
-        let config: Config = config.decode()?;
+impl Clickhouse {
+    fn new(config: Config) -> Result<Self> {
         let http = HttpClient::builder()
             .basic_auth(&config.user, Some(&config.password))
             .base_url(config.url.clone())
@@ -47,12 +43,10 @@ impl Provider for Clickhouse {
         Ok(Clickhouse { http })
     }
 
-    fn register(r: &mut Router<Self>) {
+    fn routes(r: &mut Router<Self>) {
         Self::register_tables(r);
     }
-}
 
-impl Clickhouse {
     async fn run(&self, sql: String) -> Result<String> {
         let request = self.http.post("").body(sql);
         let response = self

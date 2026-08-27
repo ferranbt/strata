@@ -5,7 +5,6 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1"
-config-macro.workspace = true
 schema.workspace = true
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

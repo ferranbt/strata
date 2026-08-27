@@ -10,25 +10,28 @@ mod drive;
 mod gmail;
 
 use anyhow::Result;
-use config_macro::config;
+use strata_sdk::config;
 use http_client::{HttpClient, OAuth2};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use strata_sdk::page::{Cursor, Page};
-use strata_sdk::provider::Provider;
 use strata_sdk::router::{Params, Router};
 
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 
 #[config]
 struct Config {
-    #[config(default_env = "GOOGLE_CLIENT_ID")]
+    #[config(env = "GOOGLE_CLIENT_ID", description = "OAuth client ID")]
     client_id: String,
-    #[config(default_env = "GOOGLE_SECRET")]
+    #[config(env = "GOOGLE_SECRET", description = "OAuth client secret", secret)]
     secret: String,
-    #[config(default_env = "GOOGLE_REFRESH_TOKEN")]
+    #[config(
+        env = "GOOGLE_REFRESH_TOKEN",
+        description = "OAuth refresh token",
+        secret
+    )]
     refresh_token: String,
 }
 
@@ -51,11 +54,24 @@ impl Config {
 
 /// Provider state: a self-authenticating HTTP client (the bearer token is minted
 /// and refreshed by the client via the OAuth2 refresh-token flow).
+#[derive(strata_sdk::Provider)]
+#[config(Config)]
 pub struct Google {
     http: HttpClient,
 }
 
 impl Google {
+    fn new(config: Config) -> Result<Self> {
+        let http = HttpClient::builder().auth(config.auth_source()).build()?;
+        Ok(Google { http })
+    }
+
+    fn routes(r: &mut Router<Self>) {
+        calendar::register(r);
+        drive::register(r);
+        gmail::register(r);
+    }
+
     /// GET returning the parsed JSON body. The client attaches the bearer token.
     async fn api_get<T: DeserializeOwned>(&self, url: &str, query: &[(&str, &str)]) -> Result<T> {
         let response = self.authed_get(url, query).await?;
@@ -74,24 +90,6 @@ impl Google {
     async fn authed_get(&self, url: &str, query: &[(&str, &str)]) -> Result<http_client::Response> {
         let request = self.http.get(url).query(query);
         Ok(self.http.send(request).await?)
-    }
-}
-
-impl Provider for Google {
-    fn name() -> &'static str {
-        "google"
-    }
-
-    fn new(config: &strata_sdk::config::ProviderConfig) -> Result<Self> {
-        let config: Config = config.decode()?;
-        let http = HttpClient::builder().auth(config.auth_source()).build()?;
-        Ok(Google { http })
-    }
-
-    fn register(r: &mut Router<Self>) {
-        calendar::register(r);
-        drive::register(r);
-        gmail::register(r);
     }
 }
 

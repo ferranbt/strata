@@ -2,25 +2,43 @@ use std::future::Future;
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
-use config_macro::config;
+use strata_sdk::config;
 use schema::{Date, HasSchema, Timestamp};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use strata_sdk::page::{Cursor, ListStrategy, Page};
-use strata_sdk::provider::Provider;
 use strata_sdk::router::{Params, Route, Router};
 
 const API_BASE: &str = "https://api.congress.gov/v3";
 const LIMIT: u32 = 20;
 const MAX_LIMIT: u32 = 249; // 250 - end check
 
+#[config]
+struct Config {
+    #[config(env = "CONGRESS_GOV_API", description = "congress.gov API key", secret)]
+    api_key: String,
+}
+
+#[derive(strata_sdk::Provider)]
+#[config(Config)]
 pub struct Congress {
     http: http_client::HttpClient,
 }
 
 impl Congress {
+    fn new(config: Config) -> Result<Self> {
+        let http = http_client::HttpClient::builder()
+            .base_url(API_BASE)
+            .user_agent("strata/0.1")
+            .query([("format", "json")])
+            .api_token("api_key", config.api_key)
+            .build()?;
+
+        Ok(Congress { http })
+    }
+
     async fn api_get<T: for<'de> Deserialize<'de>>(
         &self,
         path: &str,
@@ -37,34 +55,8 @@ impl Congress {
 
         Ok(serde_json::from_value(raw)?)
     }
-}
 
-#[config]
-struct Config {
-    #[config(default_env = "CONGRESS_GOV_API")]
-    api_key: String,
-}
-
-impl Provider for Congress {
-    fn name() -> &'static str {
-        "congress"
-    }
-
-    fn new(config: &strata_sdk::config::ProviderConfig) -> Result<Self> {
-        let mut builder = http_client::HttpClient::builder()
-            .base_url(API_BASE)
-            .user_agent("strata/0.1")
-            .query([("format", "json")]);
-
-        let config: Config = config.decode()?;
-        builder = builder.api_token("api_key", config.api_key);
-
-        Ok(Congress {
-            http: builder.build()?,
-        })
-    }
-
-    fn register(r: &mut Router<Self>) {
+    fn routes(r: &mut Router<Self>) {
         r.add(
             Route::new()
                 .path("/bills")
@@ -238,8 +230,9 @@ mod tests {
     use strata_sdk::testkit::Client;
 
     fn client() -> Result<Client<Congress>> {
-        let config: strata_sdk::config::ProviderConfig =
-            serde_json::from_value(serde_json::json!({ "backend": "congress" }))?;
+        let config: strata_sdk::config::ProviderConfig = serde_json::from_value(
+            serde_json::json!({ "backend": "congress", "api_key": "test-key" }),
+        )?;
         Client::<Congress>::mount(&config)
     }
 

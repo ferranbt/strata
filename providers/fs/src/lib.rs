@@ -8,22 +8,18 @@ use schema::HasSchema;
 use serde::{Deserialize, Serialize};
 
 use strata_sdk::page::{Cursor, ListStrategy, Page};
-use strata_sdk::provider::Provider;
 use strata_sdk::router::{Params, Route, Router};
 
 /// Stateless: each call touches the filesystem directly.
+#[derive(strata_sdk::Provider)]
 pub struct Fs;
 
-impl Provider for Fs {
-    fn name() -> &'static str {
-        "fs"
-    }
-
-    fn new(_config: &strata_sdk::config::ProviderConfig) -> Result<Self> {
+impl Fs {
+    fn new() -> Result<Self> {
         Ok(Fs)
     }
 
-    fn register(r: &mut Router<Self>) {
+    fn routes(r: &mut Router<Self>) {
         r.add(
             Route::new()
                 .path("/file/*path")

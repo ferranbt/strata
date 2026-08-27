@@ -1,11 +1,10 @@
 use anyhow::{Context, Result, bail};
-use config_macro::config;
+use strata_sdk::config;
 use schema::{DataType, Field, Schema};
 use serde_json::Value;
 use sqlx::Row as _;
 use sqlx::mysql::{MySqlArguments, MySqlPool};
 
-use strata_sdk::provider::Provider;
 use strata_sdk::sql::{
     self, Filter, SqlCursor, SqlError, SqlSource, WriteResult, is_table_not_found, quote_str,
 };
@@ -16,6 +15,8 @@ use strata_sdk::router::Router;
 /// under so a wide multi-row insert can't trip it.
 const MAX_BIND_PARAMS: usize = 16384;
 
+#[derive(strata_sdk::Provider)]
+#[config(Config)]
 pub struct Mysql {
     config: Config,
     /// Built once and reused — a fresh pool per call costs more than the writes.
@@ -24,28 +25,22 @@ pub struct Mysql {
 
 #[config]
 struct Config {
-    #[config(default_env = "MYSQL_URL")]
+    #[config(env = "MYSQL_URL", description = "mysql:// connection URL", secret)]
     url: String,
 }
 
-impl Provider for Mysql {
-    fn name() -> &'static str {
-        "mysql"
-    }
-
-    fn new(config: &strata_sdk::config::ProviderConfig) -> Result<Self> {
+impl Mysql {
+    fn new(config: Config) -> Result<Self> {
         Ok(Mysql {
-            config: config.decode()?,
+            config,
             pool: tokio::sync::OnceCell::new(),
         })
     }
 
-    fn register(r: &mut Router<Self>) {
+    fn routes(r: &mut Router<Self>) {
         Self::register_tables(r);
     }
-}
 
-impl Mysql {
     async fn connect(&self) -> Result<MySqlPool> {
         self.pool
             .get_or_try_init(|| async {

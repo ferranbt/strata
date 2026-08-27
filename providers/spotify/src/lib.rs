@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use config_macro::config;
+use strata_sdk::config;
 use http_client::{HttpClient, OAuth2};
 use schema::HasSchema;
 use serde::de::DeserializeOwned;
@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use strata_sdk::page::ListStrategy;
-use strata_sdk::provider::Provider;
 use strata_sdk::router::{Route, Router};
 use strata_sdk::{Cursor, Page, Params};
 
@@ -18,9 +17,13 @@ const TOKEN_URL: &str = "https://accounts.spotify.com/api/token";
 
 #[config]
 pub struct Config {
-    #[config(default_env = "SPOTIFY_CLIENT_ID")]
+    #[config(env = "SPOTIFY_CLIENT_ID", description = "Spotify app client ID")]
     client_id: String,
-    #[config(default_env = "SPOTIFY_CLIENT_SECRET")]
+    #[config(
+        env = "SPOTIFY_CLIENT_SECRET",
+        description = "Spotify app client secret",
+        secret
+    )]
     client_secret: String,
 }
 
@@ -42,30 +45,24 @@ impl Config {
 const DEFAULT_LIMIT: u32 = 10;
 const MAX_LIMIT: u32 = 49; // 50 - end check
 
+#[derive(strata_sdk::Provider)]
+#[config(Config)]
 pub struct Spotify {
     http: HttpClient,
 }
 
 impl Spotify {
-    async fn api_get<T: DeserializeOwned>(&self, path: &str, query: &[(&str, &str)]) -> Result<T> {
-        let request = self.http.get(format!("{API_BASE}{path}")).query(query);
-        Ok(self.http.send_json::<T>(request).await?)
-    }
-}
-
-impl Provider for Spotify {
-    fn name() -> &'static str {
-        "spotify"
-    }
-
-    fn new(config: &strata_sdk::config::ProviderConfig) -> Result<Self> {
-        let config: Config = config.decode()?;
-
+    fn new(config: Config) -> Result<Self> {
         let http = HttpClient::builder().auth(config.auth_source()).build()?;
         Ok(Spotify { http })
     }
 
-    fn register(r: &mut Router<Self>) {
+    async fn api_get<T: DeserializeOwned>(&self, path: &str, query: &[(&str, &str)]) -> Result<T> {
+        let request = self.http.get(format!("{API_BASE}{path}")).query(query);
+        Ok(self.http.send_json::<T>(request).await?)
+    }
+
+    fn routes(r: &mut Router<Self>) {
         r.add(Route::new().path("/podcasts/:id").get(get_show));
         r.add(
             Route::new()
@@ -265,7 +262,11 @@ mod tests {
 
     fn client() -> Result<Client<Spotify>> {
         let config: strata_sdk::config::ProviderConfig =
-            serde_json::from_value(serde_json::json!({ "backend": "spotify" }))?;
+            serde_json::from_value(serde_json::json!({
+                "backend": "spotify",
+                "client_id": "test",
+                "client_secret": "test",
+            }))?;
         Client::<Spotify>::mount(&config)
     }
 

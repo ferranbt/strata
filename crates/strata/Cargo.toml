@@ -13,7 +13,6 @@ clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "process", "io-util", "time"] }
 urlencoding = "2"
 schema.workspace = true
-config-macro.workspace = true
 strata-types.workspace = true
 database.workspace = true
 http-client.workspace = true

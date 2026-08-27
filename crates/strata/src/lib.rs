@@ -29,9 +29,8 @@ pub use router::{Body, EndpointInfo, Method, Params, Response, Router};
 /// Config file consulted by [`registry`] when no explicit path is given.
 pub const DEFAULT_CONFIG: &str = "strata.toml";
 
-/// Every known backend. Used to build the default registry (all backends at
-/// their default mounts) when there's no config file.
-pub const BACKENDS: &[&str] = &[
+/// Every backend `mount_backend` knows, for its error message.
+const BACKENDS: &[&str] = &[
     "clickhouse",
     "congress",
     "dummy",
@@ -48,20 +47,22 @@ pub const BACKENDS: &[&str] = &[
     "linear",
 ];
 
-/// Build the registry: from `strata.toml` if present, else every backend mounted
-/// at its default mount point (its name).
+/// Build the registry from `strata.toml`. Every provider needs setting up before
+/// it can do anything, so there is no default registry: without a config there is
+/// nothing to mount.
 pub async fn registry() -> Result<Registry> {
-    if Path::new(DEFAULT_CONFIG).exists() {
-        registry_from_config(DEFAULT_CONFIG).await
-    } else {
-        registry_default()
+    if !Path::new(DEFAULT_CONFIG).exists() {
+        anyhow::bail!(
+            "no `{DEFAULT_CONFIG}` in this directory — write one describing the providers to \
+             mount, or pass --config <path>"
+        );
     }
+    registry_from_config(DEFAULT_CONFIG).await
 }
 
 /// The config file actually in effect: the explicit `--config`, else
-/// `strata.toml` when it exists, else `None` (the all-backends default has no
-/// file). Used by `serve` to load pipe definitions from the same source the
-/// registry was built from.
+/// `strata.toml` when it exists, else `None`. Used by `serve` to load pipe
+/// definitions from the same source the registry was built from.
 pub fn config_path(explicit: Option<&str>) -> Option<String> {
     match explicit {
         Some(path) => Some(path.to_string()),
@@ -121,17 +122,6 @@ fn mount_dummy(registry: &mut Registry) -> Result<()> {
 }
 
 const DUMMY: &str = "dummy";
-
-/// Build a registry with every backend at its default mount, settings from env
-/// only (the no-config default).
-pub fn registry_default() -> Result<Registry> {
-    let empty = ProviderConfig::default();
-    let mut registry = Registry::new();
-    for backend in BACKENDS {
-        mount_backend(&mut registry, backend, backend, &empty)?;
-    }
-    Ok(registry)
-}
 
 /// Map a backend name to its concrete provider type and mount it. The one place
 /// that enumerates known backends; config parsing stays generic.
