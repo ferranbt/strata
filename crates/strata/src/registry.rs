@@ -82,7 +82,7 @@ impl Registry {
     }
 }
 
-fn split_mount(path: &str) -> Result<(&str, String)> {
+pub fn split_mount(path: &str) -> Result<(&str, String)> {
     let (raw, query) = path.split_once('?').unwrap_or((path, ""));
     let mut segments = raw.split('/').filter(|s| !s.is_empty());
     let mount = segments

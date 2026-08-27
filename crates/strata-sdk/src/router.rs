@@ -233,6 +233,20 @@ impl std::fmt::Display for Method {
     }
 }
 
+impl std::str::FromStr for Method {
+    type Err = anyhow::Error;
+
+    fn from_str(value: &str) -> Result<Self> {
+        match value {
+            "get" => Ok(Method::Get),
+            "list" => Ok(Method::List),
+            "create" => Ok(Method::Create),
+            "put" => Ok(Method::Put),
+            other => bail!("unknown verb `{other}` (get, list, create, put)"),
+        }
+    }
+}
+
 /// The outcome of dispatching a call. Concrete fields, one per channel — never a
 /// union, so the type is always known. A verb fills only its plane's field(s):
 ///

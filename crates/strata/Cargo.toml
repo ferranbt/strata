@@ -43,6 +43,7 @@ eyre = "0.6.12"
 async-graphql = { version = "7", features = ["dynamic-schema"] }
 async-graphql-axum = "7"
 axum = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 rmcp = { version = "2.2.0", features = ["server", "macros", "transport-streamable-http-server", "server-side-http"] }
 strata-proto.workspace = true
 tokio-stream = { version = "0.1.19", features = ["net"] }
@@ -63,3 +64,7 @@ strata-substack.workspace = true
 
 [dev-dependencies]
 dockertest.workspace = true
+
+[[bin]]
+name = "strata"
+path = "bin/strata.rs"

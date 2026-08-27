@@ -33,20 +33,24 @@ const JSON: &str = "JSON";
 
 /// Serve the GraphQL schema over HTTP: `POST /graphql` runs queries, `GET /graphql`
 /// is the GraphiQL explorer, `GET /schema` returns the SDL (every type and field).
-pub async fn serve(
+pub async fn routes(
     registry: Arc<Registry>,
-    addr: std::net::SocketAddr,
     schemas: Option<Arc<dyn SchemaStore>>,
-) -> Result<()> {
-    let schema = build_schema(&registry, schemas.as_deref()).await?;
+) -> Result<axum::Router> {
+    let schema = match build_schema(&registry, schemas.as_deref()).await {
+        Ok(schema) => schema,
+        Err(e) => {
+            tracing::warn!("graphql not served: {e:#}");
+            return Ok(axum::Router::new());
+        }
+    };
     let sdl = schema.sdl();
-    let app = axum::Router::new()
+    Ok(axum::Router::new()
         .route("/graphql", get(graphiql).post_service(GraphQL::new(schema)))
-        .route("/schema", get(move || std::future::ready(sdl.clone())));
-    tracing::info!("strata GraphQL server on http://{addr}/graphql (SDL at /schema)");
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
-    Ok(())
+        .route(
+            "/graphql/schema",
+            get(move || std::future::ready(sdl.clone())),
+        ))
 }
 
 async fn graphiql() -> impl IntoResponse {

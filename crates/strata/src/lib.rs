@@ -1,6 +1,7 @@
 //! strata: define a data provider's API as typed Rust endpoints, register them
 //! in a router, and call any endpoint by path.
 
+pub mod api;
 pub mod config;
 pub mod flight;
 pub mod graphql;
@@ -9,6 +10,7 @@ pub mod mcp;
 pub mod pipe;
 pub mod providers;
 pub mod registry;
+pub mod server;
 #[cfg(test)]
 mod remote;
 pub mod request;
