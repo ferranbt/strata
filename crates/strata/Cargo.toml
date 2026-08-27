@@ -12,10 +12,10 @@ dotenvy = "0.15"
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "process", "io-util", "time"] }
 urlencoding = "2"
-schema.workspace = true
+strata-schema.workspace = true
 strata-types.workspace = true
-database.workspace = true
-http-client.workspace = true
+strata-database.workspace = true
+strata-http-client.workspace = true
 http.workspace = true
 arrow = "58"
 arrow-flight = "58"
@@ -63,7 +63,7 @@ strata-sqlite.workspace = true
 strata-substack.workspace = true
 
 [dev-dependencies]
-dockertest.workspace = true
+strata-dockertest.workspace = true
 
 [[bin]]
 name = "strata"

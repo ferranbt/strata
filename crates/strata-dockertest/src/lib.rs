@@ -2,7 +2,7 @@
 //!
 //! ```no_run
 //! # async fn ex() -> anyhow::Result<()> {
-//! use dockertest::Dockertest;
+//! use strata_dockertest::Dockertest;
 //! use std::time::Duration;
 //!
 //! let ch = Dockertest::image("clickhouse/clickhouse-server")

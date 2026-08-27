@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use schema::{HasSchema, Timestamp};
+use strata_schema::{HasSchema, Timestamp};
 use serde::{Deserialize, Serialize};
 
 use strata_sdk::page::{Cursor, ListStrategy, Page};
@@ -12,12 +12,12 @@ const MAX_LIMIT: u32 = 99; // 100 - end check
 
 #[derive(strata_sdk::Provider)]
 pub struct Substack {
-    http: http_client::HttpClient,
+    http: strata_http_client::HttpClient,
 }
 
 impl Substack {
     fn new() -> Result<Self> {
-        let http = http_client::HttpClient::builder()
+        let http = strata_http_client::HttpClient::builder()
             .user_agent("Mozilla/5.0 (compatible; strata/0.1)")
             .build()?;
         Ok(Substack { http })

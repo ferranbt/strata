@@ -4,7 +4,7 @@ pub use store::Database;
 
 #[cfg(feature = "test-support")]
 pub mod testing {
-    use dockertest::{Dockertest, Running};
+    use strata_dockertest::{Dockertest, Running};
 
     pub struct TestPostgres {
         /// Dropped → the container is removed.

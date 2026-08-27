@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{Result, bail};
-use schema::{HasSchema, Schema};
+use strata_schema::{HasSchema, Schema};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::Mutex;
@@ -393,7 +393,7 @@ struct WriteResult {
 mod tests {
     use super::*;
     use strata_sdk::testkit::Client;
-    use schema::{Date, Timestamp};
+    use strata_schema::{Date, Timestamp};
 
     #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, HasSchema)]
     struct Meta {

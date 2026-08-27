@@ -9,7 +9,7 @@ use arrow_schema::Schema as ArrowSchema;
 use iceberg::spec::{
     ListType, NestedField, NestedFieldRef, PrimitiveType, Schema as IcebergSchema, StructType, Type,
 };
-use schema::{DataType, Schema};
+use strata_schema::{DataType, Schema};
 
 pub(super) fn strata_to_iceberg_schema(schema: &Schema) -> Result<IcebergSchema> {
     let mut next_id = 0;
@@ -17,7 +17,7 @@ pub(super) fn strata_to_iceberg_schema(schema: &Schema) -> Result<IcebergSchema>
     Ok(IcebergSchema::builder().with_fields(nested).build()?)
 }
 
-fn struct_fields(fields: &[schema::Field], next_id: &mut i32) -> Vec<NestedFieldRef> {
+fn struct_fields(fields: &[strata_schema::Field], next_id: &mut i32) -> Vec<NestedFieldRef> {
     fields
         .iter()
         .map(|f| {
@@ -61,10 +61,10 @@ pub(super) fn iceberg_to_strata_schema(schema: &IcebergSchema) -> Schema {
     Schema::new(strata_fields(schema.as_struct().fields()))
 }
 
-fn strata_fields(fields: &[NestedFieldRef]) -> Vec<schema::Field> {
+fn strata_fields(fields: &[NestedFieldRef]) -> Vec<strata_schema::Field> {
     fields
         .iter()
-        .map(|f| schema::Field::new(&f.name, strata_type(&f.field_type), !f.required))
+        .map(|f| strata_schema::Field::new(&f.name, strata_type(&f.field_type), !f.required))
         .collect()
 }
 

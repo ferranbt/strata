@@ -6,7 +6,7 @@ use arrow::record_batch::RecordBatch;
 use arrow_array::Array;
 use arrow_schema::Schema;
 use futures::stream::{BoxStream, StreamExt};
-use schema::{Annotations, DataType, HasSchema, Schema as StrataSchema};
+use strata_schema::{Annotations, DataType, HasSchema, Schema as StrataSchema};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -188,7 +188,7 @@ fn strata_schema_to_arrow_fields(schema: &StrataSchema) -> Fields {
     arrow_fields(&schema.fields)
 }
 
-fn arrow_fields(fields: &[schema::Field]) -> Fields {
+fn arrow_fields(fields: &[strata_schema::Field]) -> Fields {
     let fields: Vec<FieldRef> = fields
         .iter()
         .map(|f| {
@@ -209,7 +209,7 @@ pub fn arrow_schema_to_strata(schema: &Schema) -> StrataSchema {
         .fields()
         .iter()
         .map(|f| {
-            let mut field = schema::Field::new(
+            let mut field = strata_schema::Field::new(
                 f.name(),
                 data_type_from_arrow(f.data_type()),
                 f.is_nullable(),
@@ -284,8 +284,8 @@ mod tests {
     #[test]
     fn temporal_maps_to_native_arrow_and_parses_strings() {
         let strata = StrataSchema::new(vec![
-            schema::Field::new("d", DataType::Date, true),
-            schema::Field::new("ts", DataType::Timestamp, true),
+            strata_schema::Field::new("d", DataType::Date, true),
+            strata_schema::Field::new("ts", DataType::Timestamp, true),
         ]);
         let arrow = strata_schema_to_arrow_schema(&strata);
         assert!(matches!(arrow.field(0).data_type(), ArrowType::Date32));
@@ -309,8 +309,8 @@ mod tests {
     #[test]
     fn encode_then_json_rows_round_trips() {
         let schema = StrataSchema::new(vec![
-            schema::Field::new("n", DataType::Int64, false),
-            schema::Field::new("s", DataType::String, true),
+            strata_schema::Field::new("n", DataType::Int64, false),
+            strata_schema::Field::new("s", DataType::String, true),
         ]);
         let items = vec![
             serde_json::json!({"n": 1, "s": "a"}),

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
 use strata_sdk::config;
-use schema::{HasSchema, Timestamp};
+use strata_schema::{HasSchema, Timestamp};
 use serde::{Deserialize, Serialize};
 
 use strata_sdk::page::{Cursor, ListStrategy, Page};
@@ -11,7 +11,7 @@ use strata_sdk::router::{Params, Route, Router};
 #[derive(strata_sdk::Provider)]
 #[config(Config)]
 pub struct Rss {
-    http: http_client::HttpClient,
+    http: strata_http_client::HttpClient,
     config: Config,
 }
 
@@ -23,7 +23,7 @@ struct Config {
 
 impl Rss {
     fn new(config: Config) -> Result<Self> {
-        let http = http_client::HttpClient::builder()
+        let http = strata_http_client::HttpClient::builder()
             .user_agent("Mozilla/5.0 (compatible; strata/0.1)")
             .build()?;
 

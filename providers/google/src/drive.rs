@@ -5,7 +5,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use schema::HasSchema;
+use strata_schema::HasSchema;
 use serde::{Deserialize, Serialize};
 
 use super::{Google, Paging};

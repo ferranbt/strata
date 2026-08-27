@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, bail};
 use strata_sdk::config;
-use schema::{DataType, Field, Schema};
+use strata_schema::{DataType, Field, Schema};
 use serde_json::Value;
 use sqlx::Row as _;
 use sqlx::mysql::{MySqlArguments, MySqlPool};
@@ -332,7 +332,7 @@ fn quote_idents(idents: &[&str]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dockertest::{Dockertest, Running};
+    use strata_dockertest::{Dockertest, Running};
 
     async fn start_mysql_server() -> Result<(Running, strata_sdk::config::ProviderConfig)> {
         let server = Dockertest::image("mysql")

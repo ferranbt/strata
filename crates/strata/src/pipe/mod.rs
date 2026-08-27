@@ -130,7 +130,7 @@ mod tests {
     use crate::pipe::store::NoPipeStore;
     use strata_sdk::dummy::Dummy;
     use crate::providers::sqlite::Sqlite;
-    use schema::{DataType, SchemaBuilder as StrataSchemaBuilder};
+    use strata_schema::{DataType, SchemaBuilder as StrataSchemaBuilder};
 
     use serde_json::json;
     use strata_types::Endpoint;

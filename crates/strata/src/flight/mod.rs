@@ -31,7 +31,7 @@ use crate::Registry;
 use crate::record::{
     Batch, BatchPage, DataStream, arrow_schema_to_strata, strata_schema_to_arrow_schema,
 };
-use schema::Schema as StrataSchema;
+use strata_schema::Schema as StrataSchema;
 use crate::router::{Body, Method};
 
 /// Start the Flight server on `addr`, serving every registered provider.

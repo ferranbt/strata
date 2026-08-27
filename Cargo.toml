@@ -2,14 +2,14 @@
 resolver = "2"
 members = [
     "crates/strata",
-    "crates/schema",
+    "crates/strata-schema",
     "crates/strata-sdk-macro",
-    "crates/database",
+    "crates/strata-database",
     "crates/strata-types",
     "crates/strata-proto",
     "crates/strata-sdk",
-    "crates/http-client",
-    "crates/dockertest",
+    "crates/strata-http-client",
+    "crates/strata-dockertest",
     "providers/clickhouse",
     "providers/congress",
     "providers/fs",
@@ -27,7 +27,7 @@ members = [
 default-members = ["crates/strata"]
 
 [workspace.dependencies]
-schema = { path = "crates/schema" }
+strata-schema = { path = "crates/strata-schema" }
 strata-sdk-macro = { path = "crates/strata-sdk-macro" }
 strata-types = { path = "crates/strata-types" }
 strata-proto = { path = "crates/strata-proto" }
@@ -45,7 +45,7 @@ strata-rss = { path = "providers/rss" }
 strata-spotify = { path = "providers/spotify" }
 strata-substack = { path = "providers/substack" }
 strata-sqlite = { path = "providers/sqlite" }
-database = { path = "crates/database" }
-http-client = { path = "crates/http-client" }
-dockertest = { path = "crates/dockertest" }
+strata-database = { path = "crates/strata-database" }
+strata-http-client = { path = "crates/strata-http-client" }
+strata-dockertest = { path = "crates/strata-dockertest" }
 http = "1"

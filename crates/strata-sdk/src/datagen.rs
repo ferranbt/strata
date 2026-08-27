@@ -8,7 +8,7 @@
 use std::ops::Range;
 
 use anyhow::Result;
-use schema::{DataType, Field, Schema};
+use strata_schema::{DataType, Field, Schema};
 use serde_json::{Map, Value, json};
 
 use crate::record::{Batch, DataStream, stringify_text_columns};

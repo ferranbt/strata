@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
 use futures::StreamExt;
-use schema::Schema;
+use strata_schema::Schema;
 use serde::{Deserialize, Serialize};
 
 use crate::datagen::Generator;

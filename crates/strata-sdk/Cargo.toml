@@ -11,7 +11,7 @@ arrow-schema = "58"
 chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
 futures = "0.3"
-schema.workspace = true
+strata-schema.workspace = true
 strata-sdk-macro.workspace = true
 serde = { version = "1", features = ["derive"] }
 serde_arrow = { version = "0.14.2", features = ["arrow-58"] }

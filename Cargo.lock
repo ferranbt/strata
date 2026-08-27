@@ -1282,21 +1282,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
 
 [[package]]
-name = "database"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "database",
- "dockertest",
- "schema",
- "serde_json",
- "sqlx",
- "strata-types",
- "tokio",
- "uuid",
-]
-
-[[package]]
 name = "der"
 version = "0.7.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1397,15 +1382,6 @@ dependencies = [
  "base64",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "dockertest"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "testcontainers",
- "tokio",
 ]
 
 [[package]]
@@ -2002,19 +1978,6 @@ dependencies = [
  "http",
  "http-body",
  "pin-project-lite",
-]
-
-[[package]]
-name = "http-client"
-version = "0.1.0"
-dependencies = [
- "base64",
- "http",
- "reqwest",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
 ]
 
 [[package]]
@@ -3900,16 +3863,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "schema"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "serde",
- "serde_json",
- "strata-sdk-macro",
-]
-
-[[package]]
 name = "schemars"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4524,20 +4477,16 @@ dependencies = [
  "base64",
  "chrono",
  "clap",
- "database",
- "dockertest",
  "dotenvy",
  "eyre",
  "feed-rs",
  "futures",
  "http",
- "http-client",
  "iceberg",
  "iceberg-catalog-sql",
  "parquet",
  "reqwest",
  "rmcp",
- "schema",
  "serde",
  "serde_arrow",
  "serde_json",
@@ -4545,15 +4494,19 @@ dependencies = [
  "sqlx",
  "strata-clickhouse",
  "strata-congress",
+ "strata-database",
+ "strata-dockertest",
  "strata-fs",
  "strata-github",
  "strata-google",
+ "strata-http-client",
  "strata-iceberg",
  "strata-linear",
  "strata-mysql",
  "strata-postgres",
  "strata-proto",
  "strata-rss",
+ "strata-schema",
  "strata-sdk",
  "strata-spotify",
  "strata-sqlite",
@@ -4575,11 +4528,11 @@ name = "strata-clickhouse"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dockertest",
- "http-client",
- "schema",
  "serde",
  "serde_json",
+ "strata-dockertest",
+ "strata-http-client",
+ "strata-schema",
  "strata-sdk",
  "tokio",
 ]
@@ -4589,11 +4542,35 @@ name = "strata-congress"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "http-client",
- "schema",
  "serde",
  "serde_json",
+ "strata-http-client",
+ "strata-schema",
  "strata-sdk",
+ "tokio",
+]
+
+[[package]]
+name = "strata-database"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde_json",
+ "sqlx",
+ "strata-database",
+ "strata-dockertest",
+ "strata-schema",
+ "strata-types",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "strata-dockertest"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "testcontainers",
  "tokio",
 ]
 
@@ -4602,9 +4579,9 @@ name = "strata-fs"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "schema",
  "serde",
  "serde_json",
+ "strata-schema",
  "strata-sdk",
  "tokio",
 ]
@@ -4615,10 +4592,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "http",
- "http-client",
- "schema",
  "serde",
  "serde_json",
+ "strata-http-client",
+ "strata-schema",
  "strata-sdk",
  "tokio",
 ]
@@ -4629,13 +4606,26 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64",
- "http-client",
- "schema",
  "serde",
  "serde_json",
+ "strata-http-client",
+ "strata-schema",
  "strata-sdk",
  "tokio",
  "urlencoding",
+]
+
+[[package]]
+name = "strata-http-client"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "http",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
 ]
 
 [[package]]
@@ -4650,10 +4640,10 @@ dependencies = [
  "iceberg",
  "iceberg-catalog-sql",
  "parquet",
- "schema",
  "serde",
  "serde_json",
  "sqlx",
+ "strata-schema",
  "strata-sdk",
  "tokio",
 ]
@@ -4664,10 +4654,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "http",
- "http-client",
- "schema",
  "serde",
  "serde_json",
+ "strata-http-client",
+ "strata-schema",
  "strata-sdk",
  "tokio",
 ]
@@ -4677,11 +4667,11 @@ name = "strata-mysql"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dockertest",
- "schema",
  "serde",
  "serde_json",
  "sqlx",
+ "strata-dockertest",
+ "strata-schema",
  "strata-sdk",
  "tokio",
 ]
@@ -4691,10 +4681,10 @@ name = "strata-postgres"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dockertest",
- "schema",
  "serde",
  "serde_json",
+ "strata-dockertest",
+ "strata-schema",
  "strata-sdk",
  "tokio",
  "tokio-postgres",
@@ -4717,12 +4707,22 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "feed-rs",
- "http-client",
- "schema",
  "serde",
  "serde_json",
+ "strata-http-client",
+ "strata-schema",
  "strata-sdk",
  "tokio",
+]
+
+[[package]]
+name = "strata-schema"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "strata-sdk-macro",
 ]
 
 [[package]]
@@ -4736,12 +4736,12 @@ dependencies = [
  "chrono",
  "clap",
  "futures",
- "schema",
  "serde",
  "serde_arrow",
  "serde_json",
  "serde_urlencoded",
  "strata-proto",
+ "strata-schema",
  "strata-sdk-macro",
  "tokio",
  "tokio-stream",
@@ -4765,10 +4765,10 @@ name = "strata-spotify"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "http-client",
- "schema",
  "serde",
  "serde_json",
+ "strata-http-client",
+ "strata-schema",
  "strata-sdk",
  "tokio",
 ]
@@ -4778,10 +4778,10 @@ name = "strata-sqlite"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "schema",
  "serde",
  "serde_json",
  "sqlx",
+ "strata-schema",
  "strata-sdk",
  "tokio",
 ]
@@ -4792,10 +4792,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "feed-rs",
- "http-client",
- "schema",
  "serde",
  "serde_json",
+ "strata-http-client",
+ "strata-schema",
  "strata-sdk",
  "tokio",
 ]

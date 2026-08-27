@@ -3,7 +3,7 @@ use std::fmt::Display;
 use std::str::FromStr;
 
 use anyhow::{Context, Result, anyhow};
-use schema::Schema;
+use strata_schema::Schema;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde::de::value::{Error, MapDeserializer};

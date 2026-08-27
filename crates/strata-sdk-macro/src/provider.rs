@@ -46,7 +46,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
                 Self::new(config)
             },
         ),
-        None => (quote! { ::schema::Schema::empty() }, quote! { Self::new() }),
+        None => (quote! { ::strata_schema::Schema::empty() }, quote! { Self::new() }),
     };
 
     quote! {
@@ -55,7 +55,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
                 #name
             }
 
-            fn config_schema() -> ::schema::Schema {
+            fn config_schema() -> ::strata_schema::Schema {
                 #schema
             }
 

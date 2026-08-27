@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use schema::{DataType, SchemaBuilder};
+use strata_schema::{DataType, SchemaBuilder};
 use serde_json::Value;
 use strata::datagen::Generator;
 use strata::harness::{Plan, Stop, run};

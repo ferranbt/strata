@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use schema::HasSchema;
+use strata_schema::HasSchema;
 use serde::{Deserialize, Serialize};
 
 use super::{Google, Paging};

@@ -21,7 +21,7 @@ use async_graphql::dynamic::{
 use async_graphql_axum::GraphQL;
 use axum::response::{Html, IntoResponse};
 use axum::routing::get;
-use schema::{DataType, Schema as StrataSchema};
+use strata_schema::{DataType, Schema as StrataSchema};
 use serde_json::Value;
 
 use crate::Registry;
@@ -69,7 +69,7 @@ pub trait SchemaStore: Send + Sync {
     ) -> crate::router::BoxFuture<'static, Result<Option<StrataSchema>>>;
 }
 
-impl SchemaStore for database::Database {
+impl SchemaStore for strata_database::Database {
     fn schema(
         &self,
         mount: String,
@@ -369,7 +369,7 @@ mod tests {
     use crate::config::ProviderConfig;
     use crate::pipe::{run_pass, store::NoPipeStore};
     use crate::providers::sqlite::Sqlite;
-    use schema::{DataType, HasSchema, SchemaBuilder};
+    use strata_schema::{DataType, HasSchema, SchemaBuilder};
     use serde_json::json;
     use strata_sdk::dummy::Dummy;
     use strata_types::{Endpoint, Pipe};
@@ -453,7 +453,7 @@ mod tests {
         }
     }
 
-    async fn put<T: serde::Serialize + schema::HasSchema>(
+    async fn put<T: serde::Serialize + strata_schema::HasSchema>(
         registry: &Registry,
         path: &str,
         rows: &[T],
@@ -471,19 +471,19 @@ mod tests {
 
     #[tokio::test]
     async fn resolves_a_declared_relationship() -> Result<()> {
-        #[derive(serde::Serialize, schema::HasSchema)]
+        #[derive(serde::Serialize, strata_schema::HasSchema)]
         struct Customer {
             #[schema(key)]
             id: i64,
             name: String,
         }
-        #[derive(serde::Serialize, schema::HasSchema)]
+        #[derive(serde::Serialize, strata_schema::HasSchema)]
         struct Order {
             #[schema(key)]
             id: i64,
             customer_id: i64,
         }
-        #[derive(serde::Serialize, schema::HasSchema)]
+        #[derive(serde::Serialize, strata_schema::HasSchema)]
         struct OrderRel {
             #[schema(key)]
             id: i64,

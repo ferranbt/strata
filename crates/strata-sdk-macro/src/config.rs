@@ -81,9 +81,9 @@ pub fn attribute(_attr: TokenStream, item: TokenStream) -> TokenStream {
         ];
         described.push(quote! {
             {
-                let mut field = ::schema::Field::new(
+                let mut field = ::strata_schema::Field::new(
                     #key,
-                    <#ty as ::schema::HasDataType>::data_type(),
+                    <#ty as ::strata_schema::HasDataType>::data_type(),
                     #nullable,
                 );
                 #(#annotations)*
@@ -107,8 +107,8 @@ pub fn attribute(_attr: TokenStream, item: TokenStream) -> TokenStream {
         #item
 
         impl ::strata_sdk::config::ConfigSchema for #name {
-            fn config_schema() -> ::schema::Schema {
-                ::schema::Schema::new(::std::vec![ #(#described),* ])
+            fn config_schema() -> ::strata_schema::Schema {
+                ::strata_schema::Schema::new(::std::vec![ #(#described),* ])
             }
 
             fn from_config(

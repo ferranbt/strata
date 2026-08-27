@@ -1,5 +1,5 @@
 [package]
-name = "dockertest"
+name = "strata-dockertest"
 version = "0.1.0"
 edition = "2024"
 

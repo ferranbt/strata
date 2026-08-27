@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use strata_sdk::config;
-use http_client::{HttpClient, OAuth2};
-use schema::HasSchema;
+use strata_http_client::{HttpClient, OAuth2};
+use strata_schema::HasSchema;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

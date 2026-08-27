@@ -338,7 +338,7 @@ fn decode_method(method: ProtoMethod) -> Result<Method, Status> {
 
 /// A page as a self-contained Arrow IPC stream: schema then batch, so the reader
 /// decodes it without carrying state between messages.
-fn encode_page(schema: &schema::Schema, page: BatchPage) -> Result<Page, Status> {
+fn encode_page(schema: &strata_schema::Schema, page: BatchPage) -> Result<Page, Status> {
     let batch = page.data.to_record_batch(schema).map_err(failed)?;
     let mut buffer = Vec::new();
     {
@@ -379,7 +379,7 @@ fn decode_page(page: Page) -> Result<BatchPage> {
 mod tests {
     use super::*;
     use crate::dummy::Dummy;
-    use schema::{DataType, SchemaBuilder};
+    use strata_schema::{DataType, SchemaBuilder};
     use strata_proto::provider_client::ProviderClient;
 
     /// Serve `dummy` over the wire and drive it with a generated gRPC client:
@@ -441,7 +441,7 @@ mod tests {
             Some(read_response::Message::Schema(schema)) => schema,
             other => panic!("expected the schema first, got {other:?}"),
         };
-        assert_eq!(serde_json::from_str::<schema::Schema>(&declared)?, row_schema);
+        assert_eq!(serde_json::from_str::<strata_schema::Schema>(&declared)?, row_schema);
 
         let mut rows = 0;
         let mut pages = 0;

@@ -21,8 +21,8 @@ pub trait Provider: Sized + Send + Sync + 'static {
     fn name() -> &'static str;
 
     /// The settings this provider takes, for a host to report before mounting.
-    fn config_schema() -> schema::Schema {
-        schema::Schema::empty()
+    fn config_schema() -> strata_schema::Schema {
+        strata_schema::Schema::empty()
     }
 
     /// Construct provider state (build HTTP clients, read credentials, etc.) from

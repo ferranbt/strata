@@ -1,4 +1,4 @@
-use schema::Schema;
+use strata_schema::Schema;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
 use strata_types::{Endpoint, Pipe};
@@ -124,7 +124,7 @@ impl Database {
 
 #[cfg(test)]
 mod tests {
-    use schema::SchemaBuilder;
+    use strata_schema::SchemaBuilder;
 
     use super::*;
     use crate::testing::TestPostgres;
@@ -177,17 +177,17 @@ mod tests {
         assert!(db.get_source_schema(&endpoint).await?.is_none());
 
         let schema = SchemaBuilder::new()
-            .column("id", schema::DataType::Int64)
-            .column("updated_at", schema::DataType::Timestamp)
+            .column("id", strata_schema::DataType::Int64)
+            .column("updated_at", strata_schema::DataType::Timestamp)
             .cursor()
             .build();
 
         db.upsert_source_schema(&endpoint, &schema).await?;
         assert_eq!(db.get_source_schema(&endpoint).await?, Some(schema.clone()));
 
-        let replacement = Schema::new(vec![schema::Field::new(
+        let replacement = Schema::new(vec![strata_schema::Field::new(
             "id",
-            schema::DataType::Int64,
+            strata_schema::DataType::Int64,
             false,
         )]);
         db.upsert_source_schema(&endpoint, &replacement).await?;

@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::Result;
-use database::Database;
+use strata_database::Database;
 use serde_json::Value;
 
 use crate::api::{self, Error};
@@ -140,7 +140,7 @@ impl api::Server for Strata {
     }
 
     async fn put(&self, request: api::PutRequest) -> api::Result<api::PutResponse> {
-        let schema: schema::Schema = match request.schema {
+        let schema: strata_schema::Schema = match request.schema {
             Some(schema) => serde_json::from_value(schema)
                 .map_err(|e| Error::invalid(format!("schema: {e}")))?,
             None => return Err(Error::invalid("a put needs a `schema`")),

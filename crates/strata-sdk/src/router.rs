@@ -13,7 +13,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow, bail};
-use schema::{DataType, Field, HasSchema, Schema};
+use strata_schema::{DataType, Field, HasSchema, Schema};
 use serde::Serialize;
 use serde_json::Value;
 

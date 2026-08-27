@@ -10,7 +10,7 @@
 //! implementation is [`PgPipeStore`] (the catalog `pipes` table).
 
 use anyhow::Result;
-use database::Database;
+use strata_database::Database;
 use uuid::Uuid;
 
 use crate::router::BoxFuture;

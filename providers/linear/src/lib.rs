@@ -4,7 +4,7 @@ use strata_sdk::{Cursor, Page, Params, Router, page::ListStrategy, router::Route
 use anyhow::{Result, anyhow};
 use strata_sdk::config;
 use http::header::{AUTHORIZATION, CONTENT_TYPE};
-use schema::{HasSchema, Timestamp};
+use strata_schema::{HasSchema, Timestamp};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -20,12 +20,12 @@ pub struct Config {
 #[derive(strata_sdk::Provider)]
 #[config(Config)]
 pub struct Linear {
-    http: http_client::HttpClient,
+    http: strata_http_client::HttpClient,
 }
 
 impl Linear {
     fn new(config: Config) -> Result<Self> {
-        let http = http_client::HttpClient::builder()
+        let http = strata_http_client::HttpClient::builder()
             .base_url(BASE_URL)
             .default_header(CONTENT_TYPE, "application/json".parse()?)
             .default_header(AUTHORIZATION, config.token.parse()?)
@@ -67,7 +67,7 @@ async fn list_issues(c: Arc<Linear>, p: Params) -> Result<Page<Issue>> {
 }
 
 async fn fetch_connection<I: DeserializeOwned>(
-    http: &http_client::HttpClient,
+    http: &strata_http_client::HttpClient,
     p: Params,
     key: &str,
     fields: &str,

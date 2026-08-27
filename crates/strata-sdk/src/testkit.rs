@@ -8,7 +8,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
-use schema::Schema;
+use strata_schema::Schema;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;

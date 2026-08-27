@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use strata_sdk::config;
 use http::HeaderMap;
-use schema::HasSchema;
+use strata_schema::HasSchema;
 use serde::{Deserialize, Serialize};
 
 use strata_sdk::page::{Cursor, ListStrategy, Page};
@@ -20,15 +20,15 @@ struct Config {
 #[derive(strata_sdk::Provider)]
 #[config(Config)]
 pub struct Github {
-    http: http_client::HttpClient,
+    http: strata_http_client::HttpClient,
 }
 
 impl Github {
     fn new(config: Config) -> Result<Self> {
         // GitHub requires a User-Agent on every request; retry rate limits / 5xx.
-        let http = http_client::HttpClient::builder()
+        let http = strata_http_client::HttpClient::builder()
             .user_agent("strata/0.1")
-            .layer(http_client::RetryBackoffLayer::default())
+            .layer(strata_http_client::RetryBackoffLayer::default())
             .bearer_auth(&config.api_key)
             .build()?;
 
@@ -89,14 +89,14 @@ struct GithubCursor {
 /// request. `envelope`, when set, names the array key to unwrap from the body
 /// (`{ "<envelope>": [...] }`); when `None` the body is the array itself.
 async fn page<T, F>(
-    http: &http_client::HttpClient,
+    http: &strata_http_client::HttpClient,
     p: Params,
     envelope: Option<String>,
     build: F,
 ) -> Result<Page<T>>
 where
     T: for<'de> Deserialize<'de>,
-    F: FnOnce() -> http_client::RequestBuilder,
+    F: FnOnce() -> strata_http_client::RequestBuilder,
 {
     let cursor: GithubCursor = p.cursor()?;
 

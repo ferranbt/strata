@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, anyhow, bail};
 use strata_sdk::config;
-use http_client::HttpClient;
-use schema::{DataType, Field, Schema};
+use strata_http_client::HttpClient;
+use strata_schema::{DataType, Field, Schema};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -302,7 +302,7 @@ fn quote_idents(idents: &[&str]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dockertest::{Dockertest, Running};
+    use strata_dockertest::{Dockertest, Running};
 
     async fn start_clickhouse_server() -> Result<(Running, strata_sdk::config::ProviderConfig)> {
         let server = Dockertest::image("clickhouse/clickhouse-server")

@@ -11,7 +11,7 @@ mod gmail;
 
 use anyhow::Result;
 use strata_sdk::config;
-use http_client::{HttpClient, OAuth2};
+use strata_http_client::{HttpClient, OAuth2};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -85,9 +85,9 @@ impl Google {
         Ok(self.http.send_json(request).await?)
     }
 
-    /// GET, returning the checked [`Response`](http_client::Response) for the
+    /// GET, returning the checked [`Response`](strata_http_client::Response) for the
     /// caller to decode as JSON or read as text.
-    async fn authed_get(&self, url: &str, query: &[(&str, &str)]) -> Result<http_client::Response> {
+    async fn authed_get(&self, url: &str, query: &[(&str, &str)]) -> Result<strata_http_client::Response> {
         let request = self.http.get(url).query(query);
         Ok(self.http.send(request).await?)
     }
@@ -141,7 +141,7 @@ impl Google {
         }
 
         let body: Value = self.api_get(url, &query).await?;
-        let items = http_client::decode_envelope(&body, key)?;
+        let items = strata_http_client::decode_envelope(&body, key)?;
         let cursor = match body.get("nextPageToken").and_then(Value::as_str) {
             Some(token) => Cursor::new(&GoogleCursor {
                 page_token: token.to_string(),

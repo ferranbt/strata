@@ -18,7 +18,7 @@ use std::sync::Arc;
 use futures::StreamExt;
 
 use anyhow::{Result, anyhow, bail};
-use schema::{DataType, HasSchema, Schema};
+use strata_schema::{DataType, HasSchema, Schema};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -427,13 +427,13 @@ fn normalize_temporals(schema: &Schema, rows: &mut [Value]) {
             };
             let Some(text) = slot.as_str() else { continue };
             match field.data_type {
-                schema::DataType::Timestamp => {
-                    if let Some(value) = schema::Timestamp::parse(text) {
+                strata_schema::DataType::Timestamp => {
+                    if let Some(value) = strata_schema::Timestamp::parse(text) {
                         *slot = Value::String(value.to_string());
                     }
                 }
-                schema::DataType::Date => {
-                    if let Some(value) = schema::Date::parse(text) {
+                strata_schema::DataType::Date => {
+                    if let Some(value) = strata_schema::Date::parse(text) {
                         *slot = Value::String(value.to_string());
                     }
                 }
@@ -521,21 +521,21 @@ pub mod suite {
     use crate::record::DataStream;
     use crate::testkit::Client;
     use anyhow::Result;
-    use schema::{DataType, HasSchema};
+    use strata_schema::{DataType, HasSchema};
 
-    #[derive(serde::Serialize, serde::Deserialize, schema::HasSchema)]
+    #[derive(serde::Serialize, serde::Deserialize, strata_schema::HasSchema)]
     pub struct Row {
         #[schema(key)]
         id: i64,
         name: String,
     }
 
-    #[derive(serde::Serialize, serde::Deserialize, schema::HasSchema)]
+    #[derive(serde::Serialize, serde::Deserialize, strata_schema::HasSchema)]
     pub struct Event {
         #[schema(key)]
         id: i64,
         #[schema(cursor)]
-        created_at: schema::Timestamp,
+        created_at: strata_schema::Timestamp,
         name: String,
     }
 

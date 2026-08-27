@@ -18,7 +18,7 @@
 
 use anyhow::{Context, Result, bail};
 use strata_sdk::config;
-use schema::{DataType, Field, Schema};
+use strata_schema::{DataType, Field, Schema};
 use serde_json::Value;
 use sqlx::Row as _;
 use sqlx::sqlite::{SqliteArguments, SqliteConnectOptions, SqlitePool};

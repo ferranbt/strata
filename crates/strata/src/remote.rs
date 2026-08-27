@@ -1,7 +1,7 @@
 // TODO: needs a testkit helper for "serve + connect"; this is too much scaffolding.
 
 use anyhow::Result;
-use schema::HasSchema;
+use strata_schema::HasSchema;
 use strata_sdk::config::ProviderConfig;
 use strata_sdk::plugin::{connect, serve_on};
 use crate::registry::Registry;
@@ -9,7 +9,7 @@ use strata_sdk::record::DataStream;
 use strata_sdk::router::{Body, Method};
 use strata_sqlite::Sqlite;
 
-#[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize, schema::HasSchema)]
+#[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize, strata_schema::HasSchema)]
 struct Row {
     #[schema(key)]
     id: i64,

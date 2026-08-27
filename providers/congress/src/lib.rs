@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
 use strata_sdk::config;
-use schema::{Date, HasSchema, Timestamp};
+use strata_schema::{Date, HasSchema, Timestamp};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -24,12 +24,12 @@ struct Config {
 #[derive(strata_sdk::Provider)]
 #[config(Config)]
 pub struct Congress {
-    http: http_client::HttpClient,
+    http: strata_http_client::HttpClient,
 }
 
 impl Congress {
     fn new(config: Config) -> Result<Self> {
-        let http = http_client::HttpClient::builder()
+        let http = strata_http_client::HttpClient::builder()
             .base_url(API_BASE)
             .user_agent("strata/0.1")
             .query([("format", "json")])
