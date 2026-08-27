@@ -78,10 +78,6 @@ impl RemoteProvider {
 }
 
 impl ProviderObject for RemoteProvider {
-    fn name(&self) -> &str {
-        &self.mount
-    }
-
     fn endpoints(&self) -> Vec<EndpointInfo> {
         self.endpoints.clone()
     }

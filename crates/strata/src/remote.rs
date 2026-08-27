@@ -4,7 +4,7 @@ use anyhow::Result;
 use schema::HasSchema;
 use strata_sdk::config::ProviderConfig;
 use strata_sdk::plugin::{connect, serve_on};
-use strata_sdk::provider::Registry;
+use crate::registry::Registry;
 use strata_sdk::record::DataStream;
 use strata_sdk::router::{Body, Method};
 use strata_sqlite::Sqlite;

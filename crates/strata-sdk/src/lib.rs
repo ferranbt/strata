@@ -18,7 +18,7 @@ pub mod testkit;
 
 pub use config::ProviderConfig;
 pub use page::{Cursor, Page};
-pub use provider::{Provider, ProviderObject, Registry};
+pub use provider::{Provider, ProviderObject};
 pub use strata_sdk_macro::{Provider, config};
 pub use record::{Batch, BatchPage, DataStream, Disposition};
 pub use router::{Body, EndpointInfo, Method, Params, Response, Route, Router};
