@@ -1,6 +1,5 @@
 //! MCP server over the registry.
 
-use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -15,7 +14,7 @@ use serde_json::Value;
 use crate::Registry;
 use crate::router::Method;
 
-pub async fn serve(registry: Arc<Registry>, addr: SocketAddr) -> Result<()> {
+pub fn routes(registry: Arc<Registry>) -> axum::Router {
     let service = StreamableHttpService::new(
         move || {
             Ok(Strata {
@@ -27,12 +26,9 @@ pub async fn serve(registry: Arc<Registry>, addr: SocketAddr) -> Result<()> {
             .with_stateful_mode(false)
             .with_json_response(true),
     );
-    let app = axum::Router::new().nest_service("/mcp", service);
-    tracing::info!("strata MCP server on http://{addr}/mcp");
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
-    Ok(())
+    axum::Router::new().nest_service("/mcp", service)
 }
+
 
 #[derive(Clone)]
 struct Strata {
